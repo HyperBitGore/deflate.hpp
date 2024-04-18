@@ -1,0 +1,3 @@
+C:/dev/cmake/deflate.h/build/CMakeFiles/deflate.dir
+C:/dev/cmake/deflate.h/build/CMakeFiles/ALL_BUILD.dir
+C:/dev/cmake/deflate.h/build/CMakeFiles/ZERO_CHECK.dir
