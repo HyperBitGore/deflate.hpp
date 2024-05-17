@@ -3,7 +3,10 @@
 #include <array>
 #include <algorithm>
 #include <string>
+#include <fstream>
 
+//https://minitoolz.com/tools/online-deflate-inflate-decompressor/
+//https://minitoolz.com/tools/online-deflate-compressor/
 
 struct CodeL {
     int8_t code;
@@ -39,20 +42,30 @@ class HuffmanTree{
         }
         return n;
     }
+    
+    void reinsert (std::vector<Member>& members, Member m) {
+        for (uint32_t i = 0; i < members.size(); i++) {
+            if (m.freq < members[i].freq) {
+                members.insert(members.begin() + i, m);
+                return;
+            }
+        }
+        members.insert(members.end(), m);
+    }
 
     public:
-    HuffmanTree(){
+    HuffmanTree () {
         
     }
-    ~HuffmanTree(){
+    ~HuffmanTree () {
 
     }
     //copy constructor
-    HuffmanTree(const HuffmanTree& huff){
+    HuffmanTree (const HuffmanTree& huff) {
         
     }
     
-    void encode(std::vector<CodeL> codes) {
+    void encode (std::vector<CodeL> codes) {
 
         struct {
             bool operator()(CodeL a, CodeL b) const { return a.n < b.n; }
@@ -80,21 +93,39 @@ class HuffmanTree{
             membs.erase(membs.begin() + index);
             //step 2
             Member m3 = {-1, m.freq + m2.freq};
-            m3.left = std::make_shared<Member>(m);
-            m3.right = std::make_shared<Member>(m2);
+            std::shared_ptr<Member> mp = std::make_shared<Member>(m);
+            std::shared_ptr<Member> mp2 = std::make_shared<Member>(m2);
+            m3.left = (m.code < m2.code) ? mp : mp2;
+            m3.right = (m.code < m2.code) ? mp2 : mp;
             //step 3
-            membs.push_back(m3);
+            reinsert(membs, m3);
         }
         head = std::make_shared<Member>(membs[0]);
+    }
 
+    std::string flatten () {
         
     }
+
 };
 
+/*
+    * Data elements are packed into bytes in order of
+    increasing bit number within the byte, i.e., starting
+    with the least-significant bit of the byte.
+    * Data elements other than Huffman codes are packed
+    starting with the least-significant bit of the data
+    element.
+    * Huffman codes are packed starting with the most-
+    significant bit of the code.
+*/
 
 class Deflate{
 private:
-
+    //from right to left
+    uint8_t extract1Bit(uint8_t c, uint8_t n) {
+        return (c >> n) & 1;
+    }
 public:
     Deflate () {
 
@@ -111,6 +142,40 @@ public:
 
     }
     void decode (std::string file_path) {
+        std::ifstream f;
+        f.open(file_path);
+        //reading bits
+        bool e = true;
+        while(e) {
+            //read the first three bits
+            char c = f.get();
+            uint8_t bfinal = extract1Bit(c, 0);
+            uint8_t btype = (extract1Bit(c, 1) | extract1Bit(c, 2));
+            //rest of block parsing
+            switch (btype) {
+                //uncompressed block
+                case 0:
 
+                break;
+                //compressed with fixed huffman codes
+                case 1:
+                
+                break;
+                //compressed with dynamic huffman codes
+                case 2:
+                
+                break;
+                //error block (reserved)
+                case 3:
+                    e = false;
+                break;
+            }
+            //means we finished decoding the final block
+            if (bfinal) {
+                e = false;
+            }
+        }
+
+        f.close();
     }
 };
