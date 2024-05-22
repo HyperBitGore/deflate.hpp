@@ -107,6 +107,11 @@ class HuffmanTree{
         
     }
 
+    uint32_t decode_bits (uint32_t input) {
+
+        return 300; //never possible in a deflate compressed block
+    }
+
 };
 
 /*
@@ -123,7 +128,7 @@ class HuffmanTree{
 class Deflate{
 private:
     //from right to left
-    uint8_t extract1Bit(uint8_t c, uint8_t n) {
+    static uint8_t extract1Bit(uint8_t c, uint8_t n) {
         return (c >> n) & 1;
     }
 public:
@@ -141,25 +146,45 @@ public:
     Deflate (const Deflate&& def) {
 
     }
-    void decode (std::string file_path) {
+    static void decode (std::string file_path, std::string new_file) {
+        std::ofstream nf;
+        nf.open(new_file, std::ios::binary);
         std::ifstream f;
-        f.open(file_path);
+        f.open(file_path, std::ios::binary);
         //reading bits
         bool e = true;
         while(e) {
             //read the first three bits
             char c = f.get();
+            uint16_t len;
+            uint16_t nlen;
             uint8_t bfinal = extract1Bit(c, 0);
             uint8_t btype = (extract1Bit(c, 1) | extract1Bit(c, 2));
             //rest of block parsing
             switch (btype) {
                 //uncompressed block
                 case 0:
-
+                    //skip remaining bits
+                    //read len bytes
+                    len = f.get();
+                    len |= (f.get() << 8);
+                    //read nlen bytes
+                    nlen = f.get();
+                    nlen |= (f.get() << 8);
+                    //read the rest of uncompressed block
+                    for (uint32_t i = 0; i < len; i++) {
+                        uint8_t n = f.get();
+                        nf << n;
+                    }
                 break;
+                //compressed alphabet
+                    //0-255 literals
+                    //256 end of block
+                    //257-285 length codes
+                //parse the blocks with uint16_ts since the values go up to 287, technically but the 286-287 don't participate
                 //compressed with fixed huffman codes
                 case 1:
-                
+
                 break;
                 //compressed with dynamic huffman codes
                 case 2:
@@ -177,5 +202,6 @@ public:
         }
 
         f.close();
+        nf.close();
     }
 };
