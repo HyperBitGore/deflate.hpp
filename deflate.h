@@ -7,45 +7,28 @@
 
 //https://minitoolz.com/tools/online-deflate-inflate-decompressor/
 //https://minitoolz.com/tools/online-deflate-compressor/
+//https://github.com/madler/zlib
 
-struct CodeL {
-    int8_t code;
-    int32_t n;
+struct Code {
+    uint16_t code; //actual code
+    int32_t len; //code length
 };
 
 //huffman tree class for deflate, put this in private for deflate later
 class HuffmanTree{
     private:
     struct Member{
-        int8_t code;
-        int32_t freq;
+        int16_t code;
+        int32_t len;
         std::shared_ptr<Member> left = nullptr;
         std::shared_ptr<Member> right = nullptr;
 
     };
     std::shared_ptr<Member> head = nullptr;
-
-    void insert (Member m) {
-        if (head) {
-           
-        } else {
-            
-        }
-    }
-
-    uint32_t pick_lowest (std::vector<Member>& members) {
-        uint32_t n = 0;
-        for(uint32_t i = 0; i < members.size(); i++) {
-            if (members[i].freq < members[n].freq) {
-                n = i;
-            }
-        }
-        return n;
-    }
     
     void reinsert (std::vector<Member>& members, Member m) {
         for (uint32_t i = 0; i < members.size(); i++) {
-            if (m.freq < members[i].freq) {
+            if (m.len < members[i].len) {
                 members.insert(members.begin() + i, m);
                 return;
             }
@@ -53,6 +36,42 @@ class HuffmanTree{
         members.insert(members.end(), m);
     }
 
+    std::vector<std::vector<Member>> splitOnLengths (std::vector<Member>& membs) {
+        int32_t cur_len = membs[0].len;
+        std::vector<std::vector<Member>> out;
+        int32_t i = 0;
+        while (i < membs.size()) {
+            std::vector<Member> temp;
+            for (; i < membs.size() && membs[i].len == cur_len; i++) {
+                temp.push_back(membs[i]);
+            }
+            cur_len = (i < membs.size()) ? membs[i].len : 0;
+            out.push_back(temp);
+        }
+        return out;
+    }
+
+
+    int32_t findMaxCode (std::vector<Code>& codes) {
+        int32_t o = codes[0].code;
+        for (int32_t i = 0; i < codes.size(); i++) {
+            if (codes[i].code > o) {
+                o = codes[i].code;
+            }
+        }
+        return o;
+    }
+
+    int16_t countCodeLength (std::vector<Member>& membs, int32_t code_length) {
+        int16_t count = 0;
+        for (auto& i : membs) {
+            if (i.len == code_length) {
+                count++;
+            }
+        }
+        return count;
+    }
+    std::vector<Member> members;
     public:
     HuffmanTree () {
         
@@ -65,34 +84,54 @@ class HuffmanTree{
         
     }
     
-    void encode (std::vector<CodeL> codes) {
-
+    bool encode (std::vector<Code> codes) {
+        if (codes.size() < 1) {
+            return false;
+        }
+        int32_t max_code = findMaxCode(codes);
         struct {
-            bool operator()(CodeL a, CodeL b) const { return a.n < b.n; }
+            bool operator()(Code a, Code b) const { return a.len < b.len; }
         } compareCodeL;
 
         std::sort(codes.begin(), codes.end(), compareCodeL);
         std::vector<Member> membs;
         for (auto& i : codes) {
-            membs.push_back({i.code, i.n});
+            membs.push_back({(int8_t)i.code, i.len});
+        }
+        std::vector<Member> saved_memb = membs;
+        int16_t code = 0;
+        int16_t next_code[16];
+        int16_t bl_count[16];
+        for (uint32_t i = 0; i < 16; i++) {
+            bl_count[i] = countCodeLength(membs, i);
+        }
+        bl_count[0] = 0;
+        for (int32_t bits = 1; bits <= 15; bits++) {
+            code = (code + bl_count[bits - 1]) << 1;
+            next_code[bits] = code;
         }
 
+        for (int32_t i = 0; i < membs.size(); i++) {
+            int32_t len = membs[i].len;
+            membs[i].code = next_code[len];
+            next_code[len]++;
+        }
         //STEP 1: pick the two smallest freq in array
         //STEP 2: combine the two lowest freq leafs
         //STEP 3: reinsert the new leaf into array
         //REPEAT: until the array is empty
 
 
-        while (membs.size() > 1) {
+
+
+        /* while (membs.size() > 1) {
             //step 1
-            uint32_t index = pick_lowest(membs);
-            Member m = membs[index];
-            membs.erase(membs.begin() + index);
-            index = pick_lowest(membs);
-            Member m2 = membs[index];
-            membs.erase(membs.begin() + index);
+            Member m = membs[0];
+            membs.erase(membs.begin());
+            Member m2 = membs[0];
+            membs.erase(membs.begin());
             //step 2
-            Member m3 = {-1, m.freq + m2.freq};
+            Member m3 = {-1, m.len + m2.len};
             std::shared_ptr<Member> mp = std::make_shared<Member>(m);
             std::shared_ptr<Member> mp2 = std::make_shared<Member>(m2);
             m3.left = (m.code < m2.code) ? mp : mp2;
@@ -100,7 +139,9 @@ class HuffmanTree{
             //step 3
             reinsert(membs, m3);
         }
-        head = std::make_shared<Member>(membs[0]);
+        head = std::make_shared<Member>(membs[0]); */
+        members = membs;
+        return true;
     }
 
     std::string flatten () {
@@ -146,7 +187,7 @@ public:
     Deflate (const Deflate&& def) {
 
     }
-    static void decode (std::string file_path, std::string new_file) {
+    static void inflate (std::string file_path, std::string new_file) {
         std::ofstream nf;
         nf.open(new_file, std::ios::binary);
         std::ifstream f;
@@ -184,7 +225,7 @@ public:
                 //parse the blocks with uint16_ts since the values go up to 287, technically but the 286-287 don't participate
                 //compressed with fixed huffman codes
                 case 1:
-
+                    
                 break;
                 //compressed with dynamic huffman codes
                 case 2:
