@@ -25,7 +25,11 @@ class HuffmanTree{
 
     };
     std::shared_ptr<Member> head = nullptr;
-    
+    //from right to left
+    uint8_t extract1Bit(uint16_t c, uint16_t n) {
+        return (c >> n) & 1;
+    }
+
     void reinsert (std::vector<Member>& members, Member m) {
         for (uint32_t i = 0; i < members.size(); i++) {
             if (m.len < members[i].len) {
@@ -35,22 +39,6 @@ class HuffmanTree{
         }
         members.insert(members.end(), m);
     }
-
-    std::vector<std::vector<Member>> splitOnLengths (std::vector<Member>& membs) {
-        int32_t cur_len = membs[0].len;
-        std::vector<std::vector<Member>> out;
-        int32_t i = 0;
-        while (i < membs.size()) {
-            std::vector<Member> temp;
-            for (; i < membs.size() && membs[i].len == cur_len; i++) {
-                temp.push_back(membs[i]);
-            }
-            cur_len = (i < membs.size()) ? membs[i].len : 0;
-            out.push_back(temp);
-        }
-        return out;
-    }
-
 
     int32_t findMaxCode (std::vector<Code>& codes) {
         int32_t o = codes[0].code;
@@ -71,7 +59,46 @@ class HuffmanTree{
         }
         return count;
     }
-    std::vector<Member> members;
+
+    void insert (Member m) {
+        if (!head) {
+            Member mm = {-1, 0};
+            head = std::make_shared<Member>(mm);
+        }
+        std::shared_ptr<Member> ptr = head;
+        std::vector<Member> members;
+        uint16_t bit_offset = m.len;
+        while (true) {
+            bit_offset--;
+            // check if go left or right
+            uint8_t val = extract1Bit(m.code, bit_offset);
+
+            // left = 0 right = 1
+            if (val) {
+                //check if right is open
+                if (!ptr->right) {
+                    Member mm = {-1, 0};
+                    ptr->right = std::make_shared<Member>(mm);
+                }
+                ptr = ptr->right;
+            } else {
+                //check if left is open
+                if (!ptr->left) {
+                    Member mm = {-1, 0};
+                    ptr->left = std::make_shared<Member>(mm);
+                }
+                ptr = ptr->left;
+            }
+
+            // ptr->len += m.len;
+            //check if on last ptr
+            if (bit_offset == 0) {
+                ptr->code = m.code;
+                ptr->len = m.len;
+                break;
+            }
+        }
+    }
     public:
     HuffmanTree () {
         
@@ -116,31 +143,18 @@ class HuffmanTree{
             membs[i].code = next_code[len];
             next_code[len]++;
         }
-        //STEP 1: pick the two smallest freq in array
-        //STEP 2: combine the two lowest freq leafs
-        //STEP 3: reinsert the new leaf into array
-        //REPEAT: until the array is empty
 
+        //LOOP THROUGH AND DETERMINE WHERE TO PLACE MEMBS BASED ON THEIR CODE
 
-
-
-        /* while (membs.size() > 1) {
-            //step 1
-            Member m = membs[0];
+        while (membs.size() > 0) {
+            insert(membs[0]);
             membs.erase(membs.begin());
-            Member m2 = membs[0];
-            membs.erase(membs.begin());
-            //step 2
-            Member m3 = {-1, m.len + m2.len};
-            std::shared_ptr<Member> mp = std::make_shared<Member>(m);
-            std::shared_ptr<Member> mp2 = std::make_shared<Member>(m2);
-            m3.left = (m.code < m2.code) ? mp : mp2;
-            m3.right = (m.code < m2.code) ? mp2 : mp;
-            //step 3
-            reinsert(membs, m3);
         }
-        head = std::make_shared<Member>(membs[0]); */
-        members = membs;
+
+
+
+
+
         return true;
     }
 
@@ -187,7 +201,14 @@ public:
     Deflate (const Deflate&& def) {
 
     }
+    //need struct to represent distance codes and their extra bits/lengths
     static void inflate (std::string file_path, std::string new_file) {
+        //creating default huffman tree
+        int16_t i = 0;
+        for (; i < 144; i++) {
+            
+        }
+        //starting parse of file
         std::ofstream nf;
         nf.open(new_file, std::ios::binary);
         std::ifstream f;
