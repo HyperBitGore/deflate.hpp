@@ -1,16 +1,15 @@
-#include <iostream>
+#include <fstream>
+#include <memory>
 #include <vector>
-#include <array>
 #include <algorithm>
 #include <string>
-#include <fstream>
 
 //https://minitoolz.com/tools/online-deflate-inflate-decompressor/
 //https://minitoolz.com/tools/online-deflate-compressor/
 //https://github.com/madler/zlib
 
 struct Code {
-    uint16_t code; //actual code
+    int16_t code; //actual code
     int32_t len; //code length
 };
 
@@ -20,11 +19,13 @@ class HuffmanTree{
     struct Member{
         int16_t code;
         int32_t len;
+        int16_t compressed_code;
+        int8_t extra_bits = 0;
         std::shared_ptr<Member> left = nullptr;
         std::shared_ptr<Member> right = nullptr;
 
     };
-    std::shared_ptr<Member> head = nullptr;
+    std::shared_ptr<Member> head;
     //from right to left
     uint8_t extract1Bit(uint16_t c, uint16_t n) {
         return (c >> n) & 1;
@@ -101,7 +102,11 @@ class HuffmanTree{
     }
     public:
     HuffmanTree () {
-        
+        head = nullptr;
+    }
+
+    HuffmanTree (std::vector<Code> codes) {
+        encode(codes);
     }
     ~HuffmanTree () {
 
@@ -123,7 +128,7 @@ class HuffmanTree{
         std::sort(codes.begin(), codes.end(), compareCodeL);
         std::vector<Member> membs;
         for (auto& i : codes) {
-            membs.push_back({(int8_t)i.code, i.len});
+            membs.push_back({i.code, i.len});
         }
         std::vector<Member> saved_memb = membs;
         int16_t code = 0;
@@ -140,7 +145,7 @@ class HuffmanTree{
 
         for (int32_t i = 0; i < membs.size(); i++) {
             int32_t len = membs[i].len;
-            membs[i].code = next_code[len];
+            membs[i].compressed_code = next_code[len];
             next_code[len]++;
         }
 
@@ -159,7 +164,7 @@ class HuffmanTree{
     }
 
     std::string flatten () {
-        
+        return "";
     }
 
     uint32_t decode_bits (uint32_t input) {
@@ -180,11 +185,44 @@ class HuffmanTree{
     significant bit of the code.
 */
 
+// https://en.wikipedia.org/wiki/LZ77_and_LZ78
+
+//add extra bits
+//add LZ77 compression/decompression
+//implement rest of inflate
+//implement deflate itself
+//add error checking and maybe test files lol
 class Deflate{
 private:
     //from right to left
-    static uint8_t extract1Bit(uint8_t c, uint8_t n) {
+    static uint8_t extract1Bit (uint8_t c, uint8_t n) {
         return (c >> n) & 1;
+    }
+    static std::vector<Code> generateFixedCodes () {
+        std::vector <Code> fixed_codes;
+        int16_t i = 0;
+        //regular alphabet
+        for (; i < 144; i++) {
+            fixed_codes.push_back({i, 8});
+        }
+        for (; i < 256; i++) {
+            fixed_codes.push_back({i, 9});
+        }
+        for(; i < 280; i++) {
+            fixed_codes.push_back({i, 7});
+        }
+        for(; i < 288; i++) {
+            fixed_codes.push_back({i, 8});
+        }
+        return fixed_codes;
+    }
+    static std::vector <Code> generateFixedDistanceCodes () {
+        std::vector <Code> fixed_codes;
+        int16_t i = 0;
+        //regular alphabet
+        for (; i < 32; i++) {
+            fixed_codes.push_back({i, 5});
+        }
     }
 public:
     Deflate () {
@@ -204,10 +242,10 @@ public:
     //need struct to represent distance codes and their extra bits/lengths
     static void inflate (std::string file_path, std::string new_file) {
         //creating default huffman tree
-        int16_t i = 0;
-        for (; i < 144; i++) {
-            
-        }
+        std::vector <Code> fixed_codes = generateFixedCodes();
+        std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
+        HuffmanTree fixed_huffman(fixed_codes);
+        HuffmanTree fixed_dist_huffman(fixed_dist_codes);
         //starting parse of file
         std::ofstream nf;
         nf.open(new_file, std::ios::binary);
