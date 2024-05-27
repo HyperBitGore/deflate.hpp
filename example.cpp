@@ -1,4 +1,4 @@
-#include "deflate.h"
+#include "deflate.hpp"
 
 
 int main(){

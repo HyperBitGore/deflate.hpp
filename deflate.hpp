@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <fstream>
 #include <memory>
 #include <vector>
@@ -9,18 +10,19 @@
 //https://github.com/madler/zlib
 
 struct Code {
-    int16_t code; //actual code
+    uint16_t code; //actual code
     int32_t len; //code length
+    uint8_t extra_bits = 0; //extra bits for code
 };
 
 //huffman tree class for deflate, put this in private for deflate later
 class HuffmanTree{
     private:
     struct Member{
-        int16_t code;
+        uint16_t code;
         int32_t len;
-        int16_t compressed_code;
-        int8_t extra_bits = 0;
+        uint16_t compressed_code;
+        uint8_t extra_bits = 0;
         std::shared_ptr<Member> left = nullptr;
         std::shared_ptr<Member> right = nullptr;
 
@@ -63,7 +65,7 @@ class HuffmanTree{
 
     void insert (Member m) {
         if (!head) {
-            Member mm = {-1, 0};
+            Member mm = {0, -1};
             head = std::make_shared<Member>(mm);
         }
         std::shared_ptr<Member> ptr = head;
@@ -78,14 +80,14 @@ class HuffmanTree{
             if (val) {
                 //check if right is open
                 if (!ptr->right) {
-                    Member mm = {-1, 0};
+                    Member mm = {0, -1};
                     ptr->right = std::make_shared<Member>(mm);
                 }
                 ptr = ptr->right;
             } else {
                 //check if left is open
                 if (!ptr->left) {
-                    Member mm = {-1, 0};
+                    Member mm = {0, -1};
                     ptr->left = std::make_shared<Member>(mm);
                 }
                 ptr = ptr->left;
@@ -108,19 +110,19 @@ class HuffmanTree{
     HuffmanTree (std::vector<Code> codes) {
         encode(codes);
     }
-    ~HuffmanTree () {
-
-    }
     //copy constructor
     HuffmanTree (const HuffmanTree& huff) {
-        
+        head = huff.head;
     }
-    
+    //move constructor
+    HuffmanTree (HuffmanTree&& huff) {
+        head = huff.head;
+    }
+
     bool encode (std::vector<Code> codes) {
         if (codes.size() < 1) {
             return false;
         }
-        int32_t max_code = findMaxCode(codes);
         struct {
             bool operator()(Code a, Code b) const { return a.len < b.len; }
         } compareCodeL;
@@ -128,7 +130,7 @@ class HuffmanTree{
         std::sort(codes.begin(), codes.end(), compareCodeL);
         std::vector<Member> membs;
         for (auto& i : codes) {
-            membs.push_back({i.code, i.len});
+            membs.push_back({i.code, i.len, i.code, i.extra_bits});
         }
         std::vector<Member> saved_memb = membs;
         int16_t code = 0;
@@ -174,6 +176,33 @@ class HuffmanTree{
 
 };
 
+//https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
+//// https://en.wikipedia.org/wiki/LZ77_and_LZ78
+//entirely static class, just for abstraction
+class LZ77 {
+    private:
+    struct Match {
+        uint32_t index;
+        uint32_t length;
+    };
+
+    //finds match in lookahead buffer and returns to caller
+    static Match findMatchLookAhead () {
+        return {};
+    }
+    public:
+
+
+    static std::vector <uint8_t> compress () {
+        return {};
+    }
+    
+    static std::vector <uint8_t> decompress () {
+        return {};
+    }
+
+};
+
 /*
     * Data elements are packed into bytes in order of
     increasing bit number within the byte, i.e., starting
@@ -185,9 +214,6 @@ class HuffmanTree{
     significant bit of the code.
 */
 
-// https://en.wikipedia.org/wiki/LZ77_and_LZ78
-
-//add extra bits
 //add LZ77 compression/decompression
 //implement rest of inflate
 //implement deflate itself
@@ -200,7 +226,7 @@ private:
     }
     static std::vector<Code> generateFixedCodes () {
         std::vector <Code> fixed_codes;
-        int16_t i = 0;
+        uint16_t i = 0;
         //regular alphabet
         for (; i < 144; i++) {
             fixed_codes.push_back({i, 8});
@@ -208,21 +234,48 @@ private:
         for (; i < 256; i++) {
             fixed_codes.push_back({i, 9});
         }
+        uint8_t extra_bits = 0;
         for(; i < 280; i++) {
-            fixed_codes.push_back({i, 7});
+            switch (i) {
+                case 265:
+                    extra_bits = 1;
+                break;
+                case 269:
+                    extra_bits = 2;
+                break;
+                case 273:
+                    extra_bits = 3;
+                break;
+                case 277:
+                    extra_bits = 4;
+                break;
+            }
+            fixed_codes.push_back({i, 7, extra_bits});
         }
         for(; i < 288; i++) {
-            fixed_codes.push_back({i, 8});
+            switch (i) {
+                case 281:
+                    extra_bits = 5;
+                break;
+                case 285:
+                    extra_bits = 0;
+                break;
+            }
+            fixed_codes.push_back({i, 8, extra_bits});
         }
         return fixed_codes;
     }
     static std::vector <Code> generateFixedDistanceCodes () {
         std::vector <Code> fixed_codes;
-        int16_t i = 0;
+        uint8_t extra_bits = 0;
         //regular alphabet
-        for (; i < 32; i++) {
-            fixed_codes.push_back({i, 5});
+        for (uint16_t i = 0; i < 32; i++) {
+            if (i >= 4) {
+                extra_bits = (i / 2) - 1;
+            } 
+            fixed_codes.push_back({i, 5, extra_bits});
         }
+        return fixed_codes;
     }
 public:
     Deflate () {
@@ -270,6 +323,7 @@ public:
                     len |= (f.get() << 8);
                     //read nlen bytes
                     nlen = f.get();
+                    // NOLINTNEXTLINE
                     nlen |= (f.get() << 8);
                     //read the rest of uncompressed block
                     for (uint32_t i = 0; i < len; i++) {
