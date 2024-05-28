@@ -4,3 +4,4 @@ build
 *.parsed
 *.test
 gitkey
+*.compressed

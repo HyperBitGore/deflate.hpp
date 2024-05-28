@@ -8,4 +8,4 @@ set(CMAKE_CXX_EXTENSIONS Off)
 set(CMAKE_EXPORT_COMPILE_COMMANDS On)
 
 
-add_executable(deflate deflate.h example.cpp)
+add_executable(deflate deflate.hpp example.cpp)

@@ -176,29 +176,70 @@ class HuffmanTree{
 
 };
 
+
+struct Match {
+        uint16_t offset; //offset from match
+        uint16_t length; //length of match
+        uint8_t follow_code; //code after match
+        Match () {
+            offset = 0;
+            length = 0;
+            follow_code = 0;
+        }
+        Match (uint16_t offset, uint16_t length, uint8_t follow_code) {
+            this->offset = offset;
+            this->length = length;
+            this->follow_code = follow_code;
+        }
+};
 //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
-//// https://en.wikipedia.org/wiki/LZ77_and_LZ78
+//https://en.wikipedia.org/wiki/LZ77_and_LZ78
 //entirely static class, just for abstraction
 class LZ77 {
     private:
-    struct Match {
-        uint32_t index;
-        uint32_t length;
-    };
+    std::vector <uint8_t> lookahead;
+    std::vector <uint8_t> search;
+    uint32_t size;
 
-    //finds match in lookahead buffer and returns to caller
-    static Match findMatchLookAhead () {
-        return {};
-    }
     public:
 
-
-    static std::vector <uint8_t> compress () {
-        return {};
+    LZ77 (uint32_t size) {
+        this->size = size;
     }
-    
-    static std::vector <uint8_t> decompress () {
-        return {};
+
+    Match findNextMatch () {
+        if (search.size() == 0) {
+            return Match();
+        }
+        std::vector <Match> matches;
+        for (uint16_t i = search.size() - 1; i >= 0; i--) {
+            if (search[i] == lookahead[0]) {
+                //now see if the next few bytes match the lookaheads next few bytes lol
+                uint16_t length = 1;
+                for (uint16_t j = i; length < lookahead.size() && j < search.size() && lookahead[length] == search[j]; length++, j++);
+                Match m = {i, length, lookahead[length]};
+                matches.push_back(m);
+            }
+        }
+        uint32_t largest_index = 0;
+        for (uint32_t i = 0; i < matches.size(); i++) {
+            if (matches[i].length > matches[largest_index].length) {
+                largest_index = i;
+            }
+        }
+        return (matches.size() > 0 && matches[largest_index].length > 1) ? matches[largest_index] : Match();
+    }
+
+    //drop a byte off back of search (if at max) and add byte into search
+    void moveForward (uint8_t c) {
+        if (search.size() + 1 == size) {
+            search.erase(search.begin());
+        }
+        if (lookahead.size() + 1 == size) {
+            search.push_back(lookahead[0]);
+            lookahead.erase(lookahead.begin());
+        }
+        lookahead.push_back(c);
     }
 
 };
@@ -357,5 +398,34 @@ public:
 
         f.close();
         nf.close();
+    }
+
+    static void deflate (std::string file_path, std::string new_file) {
+        std::ifstream fi;
+        fi.open(file_path, std::ios::binary);
+        if (!fi) {
+            return;
+        }
+        std::ofstream of;
+        of.open(new_file, std::ios::binary);
+        if (!of) {
+            return;
+        }
+        LZ77 lz(20);
+        uint8_t c;
+        while ((c = fi.get())) {
+            lz.moveForward(c);
+            Match m = lz.findNextMatch();
+            if (m.length > 0) {
+                of.write(reinterpret_cast<char*>(&m.offset), sizeof(uint16_t));
+                of.write(reinterpret_cast<char*>(&m.length), sizeof(uint16_t));
+                of.write(reinterpret_cast<char*>(&m.follow_code), sizeof(uint8_t));
+            } else {
+                of << c;
+            }
+        }
+
+        fi.close();
+        of.close();
     }
 };

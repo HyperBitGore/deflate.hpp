@@ -20,4 +20,7 @@ int main(){
     }
     of.close();
     Deflate::inflate("uncompressed.test", "uncompressed.parsed");
+
+    Deflate::deflate("lz.test", "lz.compressed");
+    
 }
