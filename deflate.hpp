@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <iostream>
 #include <fstream>
 #include <memory>
 #include <vector>
@@ -192,36 +193,42 @@ struct Match {
             this->follow_code = follow_code;
         }
 };
+
+
 //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
 //https://en.wikipedia.org/wiki/LZ77_and_LZ78
-//entirely static class, just for abstraction
+//change how the lz is used so that it only outputs from the matches!
 class LZ77 {
     private:
     std::vector <uint8_t> lookahead;
     std::vector <uint8_t> search;
     uint32_t size;
-
-    public:
-
-    LZ77 (uint32_t size) {
-        this->size = size;
-    }
+    uint32_t cutoff; // index where lookahead begins
 
     Match findNextMatch () {
-        if (search.size() == 0) {
+        if (lookahead.size() < 1 || search.size() < 1) {
             return Match();
         }
         std::vector <Match> matches;
-        for (uint16_t i = search.size() - 1; i >= 0; i--) {
+        std::cout << "Entering the search with " << search.size() << " : " << lookahead.size() << " \n";
+
+        for (uint32_t i = search.size() - 1, o = 0; i >= 0; o++) {
             if (search[i] == lookahead[0]) {
-                //now see if the next few bytes match the lookaheads next few bytes lol
-                uint16_t length = 1;
-                for (uint16_t j = i; length < lookahead.size() && j < search.size() && lookahead[length] == search[j]; length++, j++);
-                Match m = {i, length, lookahead[length]};
+                uint32_t length = 1;
+                for (uint32_t j = i + 1; j < search.size() && length < lookahead.size() && search[j] == lookahead[length]; j++, length++);
+                std::cout << length << " length i:" << i << "\n";
+                Match m = {(uint16_t)o, (uint16_t)length, (length < lookahead.size()) ? lookahead[length] : lookahead[lookahead.size() - 1]};
+                std::cout << "now pushback\n";
                 matches.push_back(m);
+            }
+            if (i > 0) {
+                i--;
+            } else {
+                break;
             }
         }
         uint32_t largest_index = 0;
+        std::cout << "Entering match selection\n";
         for (uint32_t i = 0; i < matches.size(); i++) {
             if (matches[i].length > matches[largest_index].length) {
                 largest_index = i;
@@ -229,19 +236,36 @@ class LZ77 {
         }
         return (matches.size() > 0 && matches[largest_index].length > 1) ? matches[largest_index] : Match();
     }
+    public:
+
+    LZ77 (uint32_t size) {
+        this->size = size;
+        this->cutoff = size/2;
+    }
+
 
     //drop a byte off back of search (if at max) and add byte into search
-    void moveForward (uint8_t c) {
-        if (search.size() + 1 == size) {
-            search.erase(search.begin());
-        }
-        if (lookahead.size() + 1 == size) {
+    Match moveForward (uint8_t c) {
+        if (lookahead.size() >= cutoff) {
             search.push_back(lookahead[0]);
             lookahead.erase(lookahead.begin());
         }
         lookahead.push_back(c);
+        return findNextMatch();
+    }
+    Match moveForward () {
+        if (lookahead.size() >= 1) {
+            search.push_back(lookahead[0]);
+            lookahead.erase(lookahead.begin());
+            return findNextMatch();
+        } else {
+            return Match();
+        }
     }
 
+    uint32_t getLookAheadSize () {
+        return (size_t)lookahead.size();
+    }
 };
 
 /*
@@ -318,6 +342,17 @@ private:
         }
         return fixed_codes;
     }
+
+    static std::streampos getFileSize (std::string file) {
+        std::streampos fsize = 0;
+        std::ifstream fi (file, std::ios::binary);
+        fsize = fi.tellg();
+        fi.seekg(0, std::ios::end);
+        fsize = fi.tellg() - fsize;
+        fi.close();
+        return fsize;
+    }
+
 public:
     Deflate () {
 
@@ -400,7 +435,9 @@ public:
         nf.close();
     }
 
+    //rewrite the file reading to be proper
     static void deflate (std::string file_path, std::string new_file) {
+        std::streampos sp = getFileSize(file_path);
         std::ifstream fi;
         fi.open(file_path, std::ios::binary);
         if (!fi) {
@@ -411,17 +448,27 @@ public:
         if (!of) {
             return;
         }
-        LZ77 lz(20);
+        LZ77 lz(2048);
         uint8_t c;
-        while ((c = fi.get())) {
-            lz.moveForward(c);
-            Match m = lz.findNextMatch();
+        bool q = false;
+        while (!q) {
+            Match m;
+            std::streampos p = sp - fi.tellg();
+            if (p > 0) {
+                c = fi.get();
+                m = lz.moveForward(c);
+            } else {
+                m = lz.moveForward();
+            }
             if (m.length > 0) {
                 of.write(reinterpret_cast<char*>(&m.offset), sizeof(uint16_t));
                 of.write(reinterpret_cast<char*>(&m.length), sizeof(uint16_t));
                 of.write(reinterpret_cast<char*>(&m.follow_code), sizeof(uint8_t));
             } else {
                 of << c;
+            }
+            if (lz.getLookAheadSize() <= 0) {
+                q = true;
             }
         }
 
