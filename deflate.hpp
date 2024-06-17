@@ -5,6 +5,7 @@
 #include <vector>
 #include <algorithm>
 #include <string>
+#include <sstream>
 
 //https://minitoolz.com/tools/online-deflate-inflate-decompressor/
 //https://minitoolz.com/tools/online-deflate-compressor/
@@ -197,11 +198,15 @@ struct Match {
 
 //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
 //https://en.wikipedia.org/wiki/LZ77_and_LZ78
-//change how the lz is used so that it only outputs from the matches!
+//switch to sliding window instead of current two buffer design
+//also get proper formatting of lz done
 class LZ77 {
     private:
     std::vector <uint8_t> lookahead;
     std::vector <uint8_t> search;
+
+    std::vector <uint8_t> buffer;
+    uint32_t window_index;
     uint32_t size;
     uint32_t cutoff; // index where lookahead begins
 
@@ -241,6 +246,7 @@ class LZ77 {
     LZ77 (uint32_t size) {
         this->size = size;
         this->cutoff = size/2;
+        this->window_index = 0;
     }
 
 
@@ -265,6 +271,32 @@ class LZ77 {
 
     uint32_t getLookAheadSize () {
         return (size_t)lookahead.size();
+    }
+
+    void copyBuffer (std::vector<uint8_t>& buf) {
+        for (uint8_t i : buf) {
+            buffer.push_back(i);
+        }
+    }
+    std::vector<uint8_t> compressBuffer () {
+        std::vector <uint8_t> buf;
+        std::stringstream ss;
+        bool q = false;
+        while (!q) {
+            Match m = moveForward();
+            if (m.length > 0) {
+                ss.write(reinterpret_cast<char*>(&m.offset), sizeof(uint16_t));
+                ss.write(reinterpret_cast<char*>(&m.length), sizeof(uint16_t));
+                ss.write(reinterpret_cast<char*>(&m.follow_code), sizeof(uint8_t));
+            } else {
+                ss << m.follow_code;
+            }
+            if (getLookAheadSize() <= 0) {
+                q = true;
+            }
+        }
+        //copy the stream to the buffer
+        return buf;
     }
 };
 
@@ -451,24 +483,20 @@ public:
         LZ77 lz(2048);
         uint8_t c;
         bool q = false;
+        std::vector<uint8_t> buffer;
         while (!q) {
             Match m;
             std::streampos p = sp - fi.tellg();
-            if (p > 0) {
+            if (p > 0 && buffer.size() < 2048) {
                 c = fi.get();
-                m = lz.moveForward(c);
+                buffer.push_back(c);
             } else {
-                m = lz.moveForward();
-            }
-            if (m.length > 0) {
-                of.write(reinterpret_cast<char*>(&m.offset), sizeof(uint16_t));
-                of.write(reinterpret_cast<char*>(&m.length), sizeof(uint16_t));
-                of.write(reinterpret_cast<char*>(&m.follow_code), sizeof(uint8_t));
-            } else {
-                of << c;
-            }
-            if (lz.getLookAheadSize() <= 0) {
-                q = true;
+                if (p <= 0) {
+                    q = true;
+                }
+                lz.copyBuffer(buffer);
+                buffer.clear();
+                lz.compressBuffer();
             }
         }
 
