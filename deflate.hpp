@@ -199,80 +199,51 @@ struct Match {
 //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
 //https://en.wikipedia.org/wiki/LZ77_and_LZ78
 //switch to sliding window instead of current two buffer design
+    //need to figure out how to only pick proper matches instead of matching every single run of characters
+        //legit encode the data in the sliding window (a-doi)
 //also get proper formatting of lz done
 class LZ77 {
     private:
-    std::vector <uint8_t> lookahead;
-    std::vector <uint8_t> search;
 
     std::vector <uint8_t> buffer;
     uint32_t window_index;
     uint32_t size;
-    uint32_t cutoff; // index where lookahead begins
 
-    Match findNextMatch () {
-        if (lookahead.size() < 1 || search.size() < 1) {
-            return Match();
+    //tries to find longest match, and moves window forward by 1 byte, if no match found, just returns an empty Match
+    Match findLongestMatch () {
+        std::vector<Match> matches;
+        for (int i = window_index - 1; i >= 0; i--) {
+            if (buffer[i] == buffer[window_index]) {
+                uint32_t length = 0;
+                int j;
+                for (j = i; j < window_index && window_index + length < buffer.size() && buffer[j] == buffer[window_index + length]; j++, length++);
+                if (length > 1) {
+                    matches.push_back(Match(i, length, (window_index + length < buffer.size()) ? buffer[window_index + length] : 0));
+                }
+            }
         }
-        std::vector <Match> matches;
-        std::cout << "Entering the search with " << search.size() << " : " << lookahead.size() << " \n";
+        Match longest;
+        if (matches.size() > 0) {
+            longest = matches[0];
+            for (auto& i : matches) {
+                if (i.length > longest.length) {
+                    longest = i;
+                }
+            }
+        }
+        window_index++;
+        return longest; 
+    }
 
-        for (uint32_t i = search.size() - 1, o = 0; i >= 0; o++) {
-            if (search[i] == lookahead[0]) {
-                uint32_t length = 1;
-                for (uint32_t j = i + 1; j < search.size() && length < lookahead.size() && search[j] == lookahead[length]; j++, length++);
-                std::cout << length << " length i:" << i << "\n";
-                Match m = {(uint16_t)o, (uint16_t)length, (length < lookahead.size()) ? lookahead[length] : lookahead[lookahead.size() - 1]};
-                std::cout << "now pushback\n";
-                matches.push_back(m);
-            }
-            if (i > 0) {
-                i--;
-            } else {
-                break;
-            }
-        }
-        uint32_t largest_index = 0;
-        std::cout << "Entering match selection\n";
-        for (uint32_t i = 0; i < matches.size(); i++) {
-            if (matches[i].length > matches[largest_index].length) {
-                largest_index = i;
-            }
-        }
-        return (matches.size() > 0 && matches[largest_index].length > 1) ? matches[largest_index] : Match();
+    uint32_t remainingWindow () {
+        return buffer.size() - window_index;
     }
     public:
 
     LZ77 (uint32_t size) {
         this->size = size;
-        this->cutoff = size/2;
         this->window_index = 0;
     }
-
-
-    //drop a byte off back of search (if at max) and add byte into search
-    Match moveForward (uint8_t c) {
-        if (lookahead.size() >= cutoff) {
-            search.push_back(lookahead[0]);
-            lookahead.erase(lookahead.begin());
-        }
-        lookahead.push_back(c);
-        return findNextMatch();
-    }
-    Match moveForward () {
-        if (lookahead.size() >= 1) {
-            search.push_back(lookahead[0]);
-            lookahead.erase(lookahead.begin());
-            return findNextMatch();
-        } else {
-            return Match();
-        }
-    }
-
-    uint32_t getLookAheadSize () {
-        return (size_t)lookahead.size();
-    }
-
     void copyBuffer (std::vector<uint8_t>& buf) {
         for (uint8_t i : buf) {
             buffer.push_back(i);
@@ -281,9 +252,8 @@ class LZ77 {
     std::vector<uint8_t> compressBuffer () {
         std::vector <uint8_t> buf;
         std::stringstream ss;
-        bool q = false;
-        while (!q) {
-            Match m = moveForward();
+        while (remainingWindow() > 0) {
+            Match m = findLongestMatch();
             if (m.length > 0) {
                 ss.write(reinterpret_cast<char*>(&m.offset), sizeof(uint16_t));
                 ss.write(reinterpret_cast<char*>(&m.length), sizeof(uint16_t));
@@ -291,11 +261,11 @@ class LZ77 {
             } else {
                 ss << m.follow_code;
             }
-            if (getLookAheadSize() <= 0) {
-                q = true;
-            }
         }
         //copy the stream to the buffer
+        for (auto& i : ss.str()) {
+            buf.push_back(i);
+        }
         return buf;
     }
 };
