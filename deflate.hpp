@@ -193,6 +193,13 @@ struct Match {
             this->length = length;
             this->follow_code = follow_code;
         }
+        bool contains (Match m) {
+            return (this->offset <= m.offset && this->offset + this->length >= m.offset + m.length);
+        }
+        //do this
+        bool overlaps (Match m) {
+            return true;
+        }
 };
 
 
@@ -201,11 +208,13 @@ struct Match {
 //switch to sliding window instead of current two buffer design
     //need to figure out how to only pick proper matches instead of matching every single run of characters
         //legit encode the data in the sliding window (a-doi)
+        //keep list of longest matches found, and if a new match overlaps an old one and is longer, replace it
 //also get proper formatting of lz done
 class LZ77 {
     private:
 
     std::vector <uint8_t> buffer;
+    std::vector <Match> prev_matches;
     uint32_t window_index;
     uint32_t size;
 
@@ -230,8 +239,17 @@ class LZ77 {
                     longest = i;
                 }
             }
+            for (auto& i : prev_matches) {
+                if (i.offset == longest.offset || i.contains(longest) || longest.contains(i)) {
+                    
+                }
+            }
+
+            prev_matches.push_back(longest);
+        } else {
+            longest.follow_code = buffer[window_index];
         }
-        window_index++;
+        window_index += (longest.length > 0) ? longest.length : 1;
         return longest; 
     }
 
@@ -251,6 +269,7 @@ class LZ77 {
     }
     std::vector<uint8_t> compressBuffer () {
         std::vector <uint8_t> buf;
+        std::vector<Match> matches;
         std::stringstream ss;
         while (remainingWindow() > 0) {
             Match m = findLongestMatch();
@@ -266,6 +285,7 @@ class LZ77 {
         for (auto& i : ss.str()) {
             buf.push_back(i);
         }
+        matches.clear();
         return buf;
     }
 };
