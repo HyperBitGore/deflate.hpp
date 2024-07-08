@@ -112,12 +112,11 @@ class HuffmanTree{
     HuffmanTree (std::vector<Code> codes) {
         encode(codes);
     }
-    //copy constructor
+    //copy constructor, not really, ptr is the same lol
     HuffmanTree (const HuffmanTree& huff) {
         head = huff.head;
     }
-    //move constructor
-    HuffmanTree (HuffmanTree&& huff) {
+    HuffmanTree (HuffmanTree& huff) {
         head = huff.head;
     }
 
@@ -193,12 +192,10 @@ struct Match {
             this->length = length;
             this->follow_code = follow_code;
         }
-        bool contains (Match m) {
-            return (this->offset <= m.offset && this->offset + this->length >= m.offset + m.length);
-        }
         //do this
         bool overlaps (Match m) {
-            return true;
+            return (!(this->offset + this->length < m.offset || m.offset + m.length < this->offset)) && 
+            (this->offset + this->length <= m.offset + m.length || m.offset + m.length <= this->offset + this->length);
         }
 };
 
@@ -210,16 +207,18 @@ struct Match {
         //legit encode the data in the sliding window (a-doi)
         //keep list of longest matches found, and if a new match overlaps an old one and is longer, replace it
 //also get proper formatting of lz done
+    //have the huffman tree as variable and lookup the code for the the triple
 class LZ77 {
     private:
 
+    HuffmanTree huff_tree;
     std::vector <uint8_t> buffer;
     std::vector <Match> prev_matches;
     uint32_t window_index;
     uint32_t size;
 
     //tries to find longest match, and moves window forward by 1 byte, if no match found, just returns an empty Match
-    Match findLongestMatch () {
+    void findLongestMatch () {
         std::vector<Match> matches;
         for (int i = window_index - 1; i >= 0; i--) {
             if (buffer[i] == buffer[window_index]) {
@@ -231,6 +230,22 @@ class LZ77 {
                 }
             }
         }
+        for (int i = 0; i < matches.size();) {
+            bool er = false;
+            for (int j = 0; j < prev_matches.size() && matches.size() > 0; j++) {
+                if (prev_matches[j].overlaps(matches[i])) {
+                    if (prev_matches[j].length < matches[i].length) {
+                        prev_matches[j] = matches[i];
+                    } else {
+                        er = true;
+                        matches.erase(matches.begin() + i);
+                    }           
+                }
+            }
+            if (!er) {
+                i++;
+            }
+        }
         Match longest;
         if (matches.size() > 0) {
             longest = matches[0];
@@ -239,52 +254,68 @@ class LZ77 {
                     longest = i;
                 }
             }
-            for (auto& i : prev_matches) {
-                if (i.offset == longest.offset || i.contains(longest) || longest.contains(i)) {
-                    
-                }
-            }
-
             prev_matches.push_back(longest);
         } else {
             longest.follow_code = buffer[window_index];
         }
         window_index += (longest.length > 0) ? longest.length : 1;
-        return longest; 
     }
 
     uint32_t remainingWindow () {
         return buffer.size() - window_index;
     }
     public:
-
-    LZ77 (uint32_t size) {
+    
+    LZ77 (uint32_t size, HuffmanTree huff) {
         this->size = size;
         this->window_index = 0;
+        this->huff_tree = huff;
     }
     void copyBuffer (std::vector<uint8_t>& buf) {
         for (uint8_t i : buf) {
             buffer.push_back(i);
         }
     }
+    //maybe just return the matches vector and the inflate function can use to compress
     std::vector<uint8_t> compressBuffer () {
         std::vector <uint8_t> buf;
         std::vector<Match> matches;
         std::stringstream ss;
+        //loop through the prev-matches and edit the buffer, then output the edited buffer
         while (remainingWindow() > 0) {
-            Match m = findLongestMatch();
-            if (m.length > 0) {
+            findLongestMatch();
+            /* if (m.length > 0) {
                 ss.write(reinterpret_cast<char*>(&m.offset), sizeof(uint16_t));
                 ss.write(reinterpret_cast<char*>(&m.length), sizeof(uint16_t));
                 ss.write(reinterpret_cast<char*>(&m.follow_code), sizeof(uint8_t));
             } else {
                 ss << m.follow_code;
+            } */
+        }
+        for (int i = 0; i < buffer.size();) {
+            bool match = false;
+            int j = 0;
+            for (; j < prev_matches.size(); j++) {
+                if (prev_matches[j].offset == i) {
+                    match = true;
+                    ss.write(reinterpret_cast<char*>(&prev_matches[j].offset), sizeof(uint16_t));
+                    ss.write(reinterpret_cast<char*>(&prev_matches[j].length), sizeof(uint16_t));
+                    ss.write(reinterpret_cast<char*>(&prev_matches[j].follow_code), sizeof(uint8_t));
+                    i += prev_matches[j].length;
+                    break;
+                }
+            }
+            if (!match) {
+                ss << buffer[i];
+                i++;
+            } else {
+                prev_matches.erase(prev_matches.begin() + j);
             }
         }
-        //copy the stream to the buffer
         for (auto& i : ss.str()) {
             buf.push_back(i);
         }
+        //copy the stream to the buffer
         matches.clear();
         return buf;
     }
@@ -302,6 +333,7 @@ class LZ77 {
 */
 
 //add LZ77 compression/decompression
+    //figure out why there is a seg fault, lol
 //implement rest of inflate
 //implement deflate itself
 //add error checking and maybe test files lol
@@ -461,16 +493,23 @@ public:
     static void deflate (std::string file_path, std::string new_file) {
         std::streampos sp = getFileSize(file_path);
         std::ifstream fi;
-        fi.open(file_path, std::ios::binary);
+        fi.open(file_path, std::ios::binary | std::ios::ate);
         if (!fi) {
             return;
         }
+        std::streamsize size = fi.tellg();
+        fi.close();
+        fi.open(file_path, std::ios::binary);
         std::ofstream of;
         of.open(new_file, std::ios::binary);
         if (!of) {
             return;
         }
-        LZ77 lz(2048);
+        std::vector <Code> fixed_codes = generateFixedCodes();
+        std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
+        HuffmanTree fixed_huffman(fixed_codes);
+        HuffmanTree fixed_dist_huffman(fixed_dist_codes);
+        LZ77 lz(2048, fixed_dist_huffman);
         uint8_t c;
         bool q = false;
         std::vector<uint8_t> buffer;

@@ -23,4 +23,8 @@ int main(){
 
     Deflate::deflate("lz.test", "lz.compressed");
     
+    Match m1(32, 5, 'c');
+    Match m2(34, 2, 'h');
+    std::cout << "Overlaps: " << m1.overlaps(m2) << "\n";
+
 }
