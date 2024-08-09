@@ -281,17 +281,11 @@ class LZ77 {
         std::vector <uint8_t> buf;
         std::vector<Match> matches;
         std::stringstream ss;
-        //loop through the prev-matches and edit the buffer, then output the edited buffer
+        //loop through buffer and find the longest matches
         while (remainingWindow() > 0) {
             findLongestMatch();
-            /* if (m.length > 0) {
-                ss.write(reinterpret_cast<char*>(&m.offset), sizeof(uint16_t));
-                ss.write(reinterpret_cast<char*>(&m.length), sizeof(uint16_t));
-                ss.write(reinterpret_cast<char*>(&m.follow_code), sizeof(uint8_t));
-            } else {
-                ss << m.follow_code;
-            } */
         }
+        //loop through buffer and edit it to compress streaks
         for (int i = 0; i < buffer.size();) {
             bool match = false;
             int j = 0;
