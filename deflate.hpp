@@ -199,7 +199,6 @@ struct Match {
         }
 };
 
-
 //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
 //https://en.wikipedia.org/wiki/LZ77_and_LZ78
 //switch to sliding window instead of current two buffer design
@@ -232,7 +231,8 @@ class LZ77 {
         }
         for (int i = 0; i < matches.size();) {
             bool er = false;
-            for (int j = 0; j < prev_matches.size() && matches.size() > 0; j++) {
+            for (int j = 0; j < prev_matches.size() && i < matches.size(); j++) {
+                // when a matches is erased creates issue somehow here
                 if (prev_matches[j].overlaps(matches[i])) {
                     if (prev_matches[j].length < matches[i].length) {
                         prev_matches[j] = matches[i];
@@ -262,7 +262,7 @@ class LZ77 {
     }
 
     uint32_t remainingWindow () {
-        return buffer.size() - window_index;
+        return (uint32_t)buffer.size() - window_index;
     }
     public:
     
@@ -277,11 +277,10 @@ class LZ77 {
         }
     }
     //maybe just return the matches vector and the inflate function can use to compress
-    std::vector<uint8_t> compressBuffer () {
-        std::vector <uint8_t> buf;
+    std::vector<Match> compressBuffer () {
         std::vector<Match> matches;
-        std::stringstream ss;
         //loop through buffer and find the longest matches
+        //figure out why this is going out of bounds
         while (remainingWindow() > 0) {
             findLongestMatch();
         }
@@ -292,26 +291,18 @@ class LZ77 {
             for (; j < prev_matches.size(); j++) {
                 if (prev_matches[j].offset == i) {
                     match = true;
-                    ss.write(reinterpret_cast<char*>(&prev_matches[j].offset), sizeof(uint16_t));
-                    ss.write(reinterpret_cast<char*>(&prev_matches[j].length), sizeof(uint16_t));
-                    ss.write(reinterpret_cast<char*>(&prev_matches[j].follow_code), sizeof(uint8_t));
+                    matches.push_back(prev_matches[j]);
                     i += prev_matches[j].length;
                     break;
                 }
             }
             if (!match) {
-                ss << buffer[i];
                 i++;
             } else {
                 prev_matches.erase(prev_matches.begin() + j);
             }
         }
-        for (auto& i : ss.str()) {
-            buf.push_back(i);
-        }
-        //copy the stream to the buffer
-        matches.clear();
-        return buf;
+        return matches;
     }
 };
 
@@ -508,18 +499,23 @@ public:
         bool q = false;
         std::vector<uint8_t> buffer;
         while (!q) {
-            Match m;
             std::streampos p = sp - fi.tellg();
             if (p > 0 && buffer.size() < 2048) {
                 c = fi.get();
                 buffer.push_back(c);
             } else {
+                // writing the block out to file
                 if (p <= 0) {
                     q = true;
                 }
                 lz.copyBuffer(buffer);
+                std::vector<Match> matches = lz.compressBuffer();
+                for (auto& i : matches) {
+                    
+                    std::cout << i.offset << ", " << i.length << ", " << i.follow_code << "\n";
+                }
+                // compress into huffman code format
                 buffer.clear();
-                lz.compressBuffer();
             }
         }
 
