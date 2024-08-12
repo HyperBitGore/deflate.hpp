@@ -5,7 +5,6 @@
 #include <vector>
 #include <algorithm>
 #include <string>
-#include <sstream>
 
 //https://minitoolz.com/tools/online-deflate-inflate-decompressor/
 //https://minitoolz.com/tools/online-deflate-compressor/
@@ -209,8 +208,6 @@ struct Match {
     //have the huffman tree as variable and lookup the code for the the triple
 class LZ77 {
     private:
-
-    HuffmanTree huff_tree;
     std::vector <uint8_t> buffer;
     std::vector <Match> prev_matches;
     uint32_t window_index;
@@ -264,20 +261,20 @@ class LZ77 {
     uint32_t remainingWindow () {
         return (uint32_t)buffer.size() - window_index;
     }
-    public:
-    
-    LZ77 (uint32_t size, HuffmanTree huff) {
-        this->size = size;
-        this->window_index = 0;
-        this->huff_tree = huff;
-    }
     void copyBuffer (std::vector<uint8_t>& buf) {
         for (uint8_t i : buf) {
             buffer.push_back(i);
         }
     }
+    public:
+    
+    LZ77 (uint32_t size) {
+        this->size = size;
+        this->window_index = 0;
+    }
     //maybe just return the matches vector and the inflate function can use to compress
-    std::vector<Match> compressBuffer () {
+    std::vector<Match> findBufferRuns (std::vector<uint8_t>& buf) {
+        copyBuffer(buf);
         std::vector<Match> matches;
         //loop through buffer and find the longest matches
         //figure out why this is going out of bounds
@@ -318,7 +315,8 @@ class LZ77 {
 */
 
 //add LZ77 compression/decompression
-    //figure out why there is a seg fault, lol
+    //add huffman functionality to lookup code
+    //test current algorithm for accuracy
 //implement rest of inflate
 //implement deflate itself
 //add error checking and maybe test files lol
@@ -478,13 +476,10 @@ public:
     static void deflate (std::string file_path, std::string new_file) {
         std::streampos sp = getFileSize(file_path);
         std::ifstream fi;
-        fi.open(file_path, std::ios::binary | std::ios::ate);
+        fi.open(file_path, std::ios::binary);
         if (!fi) {
             return;
         }
-        std::streamsize size = fi.tellg();
-        fi.close();
-        fi.open(file_path, std::ios::binary);
         std::ofstream of;
         of.open(new_file, std::ios::binary);
         if (!of) {
@@ -494,7 +489,7 @@ public:
         std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
         HuffmanTree fixed_huffman(fixed_codes);
         HuffmanTree fixed_dist_huffman(fixed_dist_codes);
-        LZ77 lz(2048, fixed_dist_huffman);
+        LZ77 lz(2048);
         uint8_t c;
         bool q = false;
         std::vector<uint8_t> buffer;
@@ -508,10 +503,9 @@ public:
                 if (p <= 0) {
                     q = true;
                 }
-                lz.copyBuffer(buffer);
-                std::vector<Match> matches = lz.compressBuffer();
+                std::vector<Match> matches = lz.findBufferRuns(buffer);
                 for (auto& i : matches) {
-                    
+
                     std::cout << i.offset << ", " << i.length << ", " << i.follow_code << "\n";
                 }
                 // compress into huffman code format
