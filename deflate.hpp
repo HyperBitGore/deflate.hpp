@@ -14,15 +14,16 @@ struct Code {
     uint16_t code; //actual code
     int32_t len; //code length
     uint8_t extra_bits = 0; //extra bits for code
+    uint16_t value;
 };
 
 //huffman tree class for deflate, put this in private for deflate later
 class HuffmanTree{
     private:
     struct Member{
-        uint16_t code;
+        uint16_t value;
         int32_t len;
-        uint16_t compressed_code;
+        uint16_t code;
         uint8_t extra_bits = 0;
         std::shared_ptr<Member> left = nullptr;
         std::shared_ptr<Member> right = nullptr;
@@ -66,7 +67,7 @@ class HuffmanTree{
 
     void insert (Member m) {
         if (!head) {
-            Member mm = {0, -1};
+            Member mm = {300, -1};
             head = std::make_shared<Member>(mm);
         }
         std::shared_ptr<Member> ptr = head;
@@ -81,14 +82,14 @@ class HuffmanTree{
             if (val) {
                 //check if right is open
                 if (!ptr->right) {
-                    Member mm = {0, -1};
+                    Member mm = {300, -1};
                     ptr->right = std::make_shared<Member>(mm);
                 }
                 ptr = ptr->right;
             } else {
                 //check if left is open
                 if (!ptr->left) {
-                    Member mm = {0, -1};
+                    Member mm = {300, -1};
                     ptr->left = std::make_shared<Member>(mm);
                 }
                 ptr = ptr->left;
@@ -97,11 +98,52 @@ class HuffmanTree{
             // ptr->len += m.len;
             //check if on last ptr
             if (bit_offset == 0) {
+                ptr->value = m.value;
                 ptr->code = m.code;
                 ptr->len = m.len;
                 break;
             }
         }
+    }
+    uint32_t UncompressedCode (uint32_t compressed_code, std::shared_ptr<Member> ptr) {
+        if (ptr->code == compressed_code) {
+            return ptr->value;
+        }
+        uint32_t left = 300;
+        if (ptr->left != nullptr) {
+            left = UncompressedCode(compressed_code, ptr->left);
+        }
+        if (left < 300) {
+            return left;
+        }
+        uint32_t right = 300;
+        if (ptr->right != nullptr) {
+            right = UncompressedCode(compressed_code, ptr->right);
+        }
+        if (right < 300) {
+            return right;
+        }
+        return 300;
+    }
+    uint32_t CompressedCode (uint32_t uncompressed_code, std::shared_ptr<Member> ptr) {
+        if (ptr->value == uncompressed_code) {
+            return ptr->code;
+        }
+        uint32_t left = 300;
+        if (ptr->left != nullptr) {
+            left = CompressedCode(uncompressed_code, ptr->left);
+        }
+        if (left < 300) {
+            return left;
+        }
+        uint32_t right = 300;
+        if (ptr->right != nullptr) {
+            right = CompressedCode(uncompressed_code, ptr->right);
+        }
+        if (right < 300) {
+            return right;
+        }
+        return 300;
     }
     public:
     HuffmanTree () {
@@ -130,7 +172,7 @@ class HuffmanTree{
         std::sort(codes.begin(), codes.end(), compareCodeL);
         std::vector<Member> membs;
         for (auto& i : codes) {
-            membs.push_back({i.code, i.len, i.code, i.extra_bits});
+            membs.push_back({i.value, i.len, i.code, i.extra_bits});
         }
         std::vector<Member> saved_memb = membs;
         int16_t code = 0;
@@ -147,7 +189,7 @@ class HuffmanTree{
 
         for (int32_t i = 0; i < membs.size(); i++) {
             int32_t len = membs[i].len;
-            membs[i].compressed_code = next_code[len];
+            membs[i].code = next_code[len];
             next_code[len]++;
         }
 
@@ -169,9 +211,13 @@ class HuffmanTree{
         return "";
     }
 
-    uint32_t decode_bits (uint32_t input) {
-
-        return 300; //never possible in a deflate compressed block
+    // already have the input decoded to proper format
+    uint32_t getUncompressedCode (uint32_t compressed_code) {
+        return UncompressedCode(compressed_code, head); 
+    }
+    // Input is uncompressed code
+    uint32_t getCompressedCode (uint32_t uncompressed_code) {
+        return CompressedCode(uncompressed_code, head);
     }
 
 };
@@ -221,7 +267,7 @@ class LZ77 {
                 uint32_t length = 0;
                 int j;
                 for (j = i; j < window_index && window_index + length < buffer.size() && buffer[j] == buffer[window_index + length]; j++, length++);
-                if (length > 1) {
+                if (length > 2) {
                     matches.push_back(Match(i, length, (window_index + length < buffer.size()) ? buffer[window_index + length] : 0));
                 }
             }
@@ -313,12 +359,14 @@ class LZ77 {
     * Huffman codes are packed starting with the most-
     significant bit of the code.
 */
+// https://www.rfc-editor.org/rfc/rfc1951#page-6
+
 
 //add LZ77 compression/decompression
     //add huffman functionality to lookup code
-    //test current algorithm for accuracy
-//implement rest of inflate
+        //-need to rewrite fixed codes generation to be accurate to actual codes (I think it works now)
 //implement deflate itself
+//implement rest of inflate
 //add error checking and maybe test files lol
 class Deflate{
 private:
@@ -330,14 +378,14 @@ private:
         std::vector <Code> fixed_codes;
         uint16_t i = 0;
         //regular alphabet
-        for (; i < 144; i++) {
-            fixed_codes.push_back({i, 8});
+        for (uint16_t code = 48; i < 144; i++, code++) {
+            fixed_codes.push_back({code, 8, 0, i});
         }
-        for (; i < 256; i++) {
-            fixed_codes.push_back({i, 9});
+        for (uint16_t code = 400; i < 256; i++, code++) {
+            fixed_codes.push_back({code, 9, 0, i});
         }
         uint8_t extra_bits = 0;
-        for(; i < 280; i++) {
+        for(uint16_t code = 0; i < 280; i++, code++) {
             switch (i) {
                 case 265:
                     extra_bits = 1;
@@ -352,9 +400,9 @@ private:
                     extra_bits = 4;
                 break;
             }
-            fixed_codes.push_back({i, 7, extra_bits});
+            fixed_codes.push_back({code, 7, extra_bits, i});
         }
-        for(; i < 288; i++) {
+        for(uint16_t code = 192; i < 288; i++, code++) {
             switch (i) {
                 case 281:
                     extra_bits = 5;
@@ -363,7 +411,7 @@ private:
                     extra_bits = 0;
                 break;
             }
-            fixed_codes.push_back({i, 8, extra_bits});
+            fixed_codes.push_back({code, 8, extra_bits, i});
         }
         return fixed_codes;
     }
@@ -375,7 +423,7 @@ private:
             if (i >= 4) {
                 extra_bits = (i / 2) - 1;
             } 
-            fixed_codes.push_back({i, 5, extra_bits});
+            fixed_codes.push_back({i, 5, extra_bits, i});
         }
         return fixed_codes;
     }
@@ -505,7 +553,8 @@ public:
                 }
                 std::vector<Match> matches = lz.findBufferRuns(buffer);
                 for (auto& i : matches) {
-
+                    uint32_t code = fixed_huffman.getCompressedCode(254 + i.length);
+                    std::cout << code << "\n";
                     std::cout << i.offset << ", " << i.length << ", " << i.follow_code << "\n";
                 }
                 // compress into huffman code format
