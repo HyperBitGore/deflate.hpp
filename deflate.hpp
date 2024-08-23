@@ -14,7 +14,7 @@ struct Code {
     uint16_t code; //actual code
     int32_t len; //code length
     uint8_t extra_bits = 0; //extra bits for code
-    uint16_t value;
+    uint16_t value; //original value
 };
 
 //huffman tree class for deflate, put this in private for deflate later
@@ -67,7 +67,7 @@ class HuffmanTree{
 
     void insert (Member m) {
         if (!head) {
-            Member mm = {300, -1};
+            Member mm = {300, -1, 0, 0};
             head = std::make_shared<Member>(mm);
         }
         std::shared_ptr<Member> ptr = head;
@@ -82,14 +82,14 @@ class HuffmanTree{
             if (val) {
                 //check if right is open
                 if (!ptr->right) {
-                    Member mm = {300, -1};
+                    Member mm = {300, -1, 0, 0};
                     ptr->right = std::make_shared<Member>(mm);
                 }
                 ptr = ptr->right;
             } else {
                 //check if left is open
                 if (!ptr->left) {
-                    Member mm = {300, -1};
+                    Member mm = {300, -1, 0, 0};
                     ptr->left = std::make_shared<Member>(mm);
                 }
                 ptr = ptr->left;
@@ -106,7 +106,7 @@ class HuffmanTree{
         }
     }
     uint32_t UncompressedCode (uint32_t compressed_code, std::shared_ptr<Member> ptr) {
-        if (ptr->code == compressed_code) {
+        if (ptr->code == compressed_code && ptr->len > 0) {
             return ptr->value;
         }
         uint32_t left = 300;
@@ -362,10 +362,8 @@ class LZ77 {
 // https://www.rfc-editor.org/rfc/rfc1951#page-6
 
 
-//add LZ77 compression/decompression
-    //add huffman functionality to lookup code
-        //-need to rewrite fixed codes generation to be accurate to actual codes (I think it works now)
 //implement deflate itself
+    //-add way to get full code info from huffman tree
 //implement rest of inflate
 //add error checking and maybe test files lol
 class Deflate{
@@ -437,6 +435,12 @@ private:
         fi.close();
         return fsize;
     }
+
+    struct match_index_comp {
+        inline bool operator() (const Match& first, const Match& second) {
+            return first.offset < second.offset;
+        }
+    };
 
 public:
     Deflate () {
@@ -557,7 +561,21 @@ public:
                     std::cout << code << "\n";
                     std::cout << i.offset << ", " << i.length << ", " << i.follow_code << "\n";
                 }
+                std::sort(matches.begin(), matches.end(), match_index_comp());
                 // compress into huffman code format
+                std::vector<uint8_t> out_buffer;
+                // i is bytes and bits is the bits offset
+                for (uint32_t i = 0, bits = 0; i < buffer.size();) {
+                    if (matches.size() > 0 && i == matches[0].offset) {
+                        // output the code for the thing
+                        uint32_t out_code = fixed_huffman.getCompressedCode(254 + matches[0].length); //this is temp way to look up
+                        
+                        matches.erase(matches.begin());
+                    } else {
+                        uint32_t out_code = fixed_huffman.getCompressedCode(buffer[i]); //this is wrong
+                    }
+                }
+
                 buffer.clear();
             }
         }
