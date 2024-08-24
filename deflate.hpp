@@ -6,10 +6,6 @@
 #include <algorithm>
 #include <string>
 
-//https://minitoolz.com/tools/online-deflate-inflate-decompressor/
-//https://minitoolz.com/tools/online-deflate-compressor/
-//https://github.com/madler/zlib
-
 struct Code {
     uint16_t code; //actual code
     int32_t len; //code length
@@ -105,45 +101,46 @@ class HuffmanTree{
             }
         }
     }
-    uint32_t UncompressedCode (uint32_t compressed_code, std::shared_ptr<Member> ptr) {
+    Code getCodeFromCompressed (uint32_t compressed_code, std::shared_ptr<Member> ptr) {
         if (ptr->code == compressed_code && ptr->len > 0) {
-            return ptr->value;
+            return {ptr->code, ptr->len, ptr->extra_bits, ptr->value};
         }
-        uint32_t left = 300;
+        Code left = {0, -1};
         if (ptr->left != nullptr) {
-            left = UncompressedCode(compressed_code, ptr->left);
+            left = getCodeFromCompressed(compressed_code, ptr->left);
         }
-        if (left < 300) {
+        if (left.len > 0) {
             return left;
         }
-        uint32_t right = 300;
+        Code right = {0, -1};
         if (ptr->right != nullptr) {
-            right = UncompressedCode(compressed_code, ptr->right);
+            right = getCodeFromCompressed(compressed_code, ptr->right);
         }
-        if (right < 300) {
+        if (right.len > 0) {
             return right;
         }
-        return 300;
+        return {0, -1, 0, 300};
     }
-    uint32_t CompressedCode (uint32_t uncompressed_code, std::shared_ptr<Member> ptr) {
-        if (ptr->value == uncompressed_code) {
-            return ptr->code;
+
+    Code getCodeFromUncompressed (uint32_t uncompressed_code, std::shared_ptr<Member> ptr) {
+        if (ptr->value == uncompressed_code && ptr->len > 0) {
+            return {ptr->code, ptr->len, ptr->extra_bits, ptr->value};
         }
-        uint32_t left = 300;
+        Code left = {0, -1};
         if (ptr->left != nullptr) {
-            left = CompressedCode(uncompressed_code, ptr->left);
+            left = getCodeFromUncompressed(uncompressed_code, ptr->left);
         }
-        if (left < 300) {
+        if (left.len > 0) {
             return left;
         }
-        uint32_t right = 300;
+        Code right = {0, -1};
         if (ptr->right != nullptr) {
-            right = CompressedCode(uncompressed_code, ptr->right);
+            right = getCodeFromUncompressed(uncompressed_code, ptr->right);
         }
-        if (right < 300) {
+        if (right.len > 0) {
             return right;
         }
-        return 300;
+        return {0, -1, 0, 300};
     }
     public:
     HuffmanTree () {
@@ -212,12 +209,12 @@ class HuffmanTree{
     }
 
     // already have the input decoded to proper format
-    uint32_t getUncompressedCode (uint32_t compressed_code) {
-        return UncompressedCode(compressed_code, head); 
+    Code getUncompressedCode (uint32_t compressed_code) {
+        return getCodeFromCompressed(compressed_code, head); 
     }
     // Input is uncompressed code
-    uint32_t getCompressedCode (uint32_t uncompressed_code) {
-        return CompressedCode(uncompressed_code, head);
+    Code getCompressedCode (uint32_t uncompressed_code) {
+        return getCodeFromUncompressed(uncompressed_code, head);
     }
 
 };
@@ -246,12 +243,6 @@ struct Match {
 
 //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
 //https://en.wikipedia.org/wiki/LZ77_and_LZ78
-//switch to sliding window instead of current two buffer design
-    //need to figure out how to only pick proper matches instead of matching every single run of characters
-        //legit encode the data in the sliding window (a-doi)
-        //keep list of longest matches found, and if a new match overlaps an old one and is longer, replace it
-//also get proper formatting of lz done
-    //have the huffman tree as variable and lookup the code for the the triple
 class LZ77 {
     private:
     std::vector <uint8_t> buffer;
@@ -349,6 +340,55 @@ class LZ77 {
     }
 };
 
+
+class Bitstream {
+private:
+    uint8_t bit_offset;
+    uint32_t offset;
+    std::vector<uint8_t> data;
+    
+    //from right to left
+    uint8_t extract1Bit(uint32_t c, uint16_t n) {
+        return (c >> n) & 1;
+    }
+    uint8_t extract1BitLeft (uint32_t c, uint16_t n) {
+        return ((c << n) & 0b10000000000000000000000000000000) >> 31;
+    }
+public:
+    Bitstream () {
+        bit_offset = 0;
+        offset = 0;
+        data.push_back(0);
+    }
+    // copy constructor
+    Bitstream (const Bitstream& b) {
+        data = b.data;
+        bit_offset = b.bit_offset;
+    }
+    void addBits (uint32_t val, uint8_t count) {
+        for (uint32_t i = 0; i < count; i++, bit_offset++) {
+            if (bit_offset > 7) {
+                data.push_back(0);
+                offset++;
+                bit_offset = 0;
+            }
+            uint8_t bit = extract1Bit(val, i);
+            data[offset] |= (bit << bit_offset);
+        }
+    }
+    std::vector<uint8_t> getData () {
+        return data;
+    }
+    void addRawBuffer (std::vector<uint8_t> buffer) {
+        for (auto& i : buffer) {
+            addBits(i, 8);
+        }
+    }
+    size_t getSize () {
+        return data.size();
+    }
+};
+
 /*
     * Data elements are packed into bytes in order of
     increasing bit number within the byte, i.e., starting
@@ -359,11 +399,16 @@ class LZ77 {
     * Huffman codes are packed starting with the most-
     significant bit of the code.
 */
+// so reading huffman codes we read left to right versus regular data which is the basic right to left bit read
 // https://www.rfc-editor.org/rfc/rfc1951#page-6
-
+//https://minitoolz.com/tools/online-deflate-inflate-decompressor/
+//https://minitoolz.com/tools/online-deflate-compressor/
+//https://github.com/madler/zlib
 
 //implement deflate itself
-    //-add way to get full code info from huffman tree
+    //-add use of extra bits
+    //-simplify generation of fixed huffman trees
+    //-construct dynamic huffman tree for block
 //implement rest of inflate
 //add error checking and maybe test files lol
 class Deflate{
@@ -441,6 +486,52 @@ private:
             return first.offset < second.offset;
         }
     };
+
+
+    // deflate
+
+    static Bitstream compressBuffer (std::vector<uint8_t> buffer, HuffmanTree tree, bool final) {
+        LZ77 lz(32768);
+        // finding the matches above length of 2
+        std::vector<Match> matches = lz.findBufferRuns(buffer);
+        std::sort(matches.begin(), matches.end(), match_index_comp());
+        // compress into huffman code format
+        Bitstream bs;
+        uint32_t pre = 0b01;
+        // writing the block out to file
+        if (final) {
+            pre |= 4;
+        }
+        bs.addBits(pre, 3);
+        for (uint32_t i = 0; i < buffer.size(); i++) {
+            if (matches.size() > 0 && i == matches[0].offset) {
+                // output the code for the thing
+                Code c = tree.getCompressedCode(254 + matches[0].length); //this is temp way to lookup 
+                bs.addBits(c.code, c.len);
+                // add extra bits to bitstream
+                matches.erase(matches.begin());
+            } else {
+                Code c = tree.getCompressedCode((uint32_t)buffer[i]);
+                bs.addBits(c.code, c.len);
+            }
+        }
+        Code endcode = tree.getCompressedCode(256);
+        bs.addBits(endcode.code, endcode.len);
+        return bs;
+    }
+
+    static Bitstream makeUncompressedBlock (std::vector<uint8_t> buffer, bool final) {
+        Bitstream bs;
+        uint8_t pre = 0b000;
+        if (final) {
+            pre |= 4;
+        }
+        bs.addBits(pre, 3);
+        bs.addBits(buffer.size(), 16);
+        bs.addBits(~(buffer.size()), 16);
+        bs.addRawBuffer(buffer);
+        return bs;
+    }
 
 public:
     Deflate () {
@@ -541,13 +632,12 @@ public:
         std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
         HuffmanTree fixed_huffman(fixed_codes);
         HuffmanTree fixed_dist_huffman(fixed_dist_codes);
-        LZ77 lz(2048);
         uint8_t c;
         bool q = false;
         std::vector<uint8_t> buffer;
         while (!q) {
             std::streampos p = sp - fi.tellg();
-            if (p > 0 && buffer.size() < 2048) {
+            if (p > 0 && buffer.size() < 32768) {
                 c = fi.get();
                 buffer.push_back(c);
             } else {
@@ -555,27 +645,18 @@ public:
                 if (p <= 0) {
                     q = true;
                 }
-                std::vector<Match> matches = lz.findBufferRuns(buffer);
-                for (auto& i : matches) {
-                    uint32_t code = fixed_huffman.getCompressedCode(254 + i.length);
-                    std::cout << code << "\n";
-                    std::cout << i.offset << ", " << i.length << ", " << i.follow_code << "\n";
+                std::vector<uint8_t> output_buffer;
+                Bitstream bs_fixed = compressBuffer(buffer, fixed_huffman, q);
+                Bitstream uncompressed = makeUncompressedBlock(buffer, q);
+                if (bs_fixed.getSize() < uncompressed.getSize()) {
+                    output_buffer = bs_fixed.getData();
+                } else {
+                    output_buffer = uncompressed.getData();
                 }
-                std::sort(matches.begin(), matches.end(), match_index_comp());
-                // compress into huffman code format
-                std::vector<uint8_t> out_buffer;
-                // i is bytes and bits is the bits offset
-                for (uint32_t i = 0, bits = 0; i < buffer.size();) {
-                    if (matches.size() > 0 && i == matches[0].offset) {
-                        // output the code for the thing
-                        uint32_t out_code = fixed_huffman.getCompressedCode(254 + matches[0].length); //this is temp way to look up
-                        
-                        matches.erase(matches.begin());
-                    } else {
-                        uint32_t out_code = fixed_huffman.getCompressedCode(buffer[i]); //this is wrong
-                    }
+                // compare size of bs
+                for (auto& i : output_buffer) {
+                    of << i;
                 }
-
                 buffer.clear();
             }
         }
