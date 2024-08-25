@@ -341,6 +341,30 @@ class LZ77 {
 };
 
 
+class RangeLookup {
+private:
+    struct Range {
+        uint32_t start;
+        uint32_t end;
+        uint32_t code;
+    };
+    std::vector <Range> ranges;
+public:
+    RangeLookup () {
+    }
+    void addRange (Range r) {
+        ranges.push_back(r);
+    }
+    uint32_t lookup (uint32_t length) {
+        for (Range i : ranges) {
+            if (length >= i.start && length <= i.end) {
+                return i.code;
+            }
+        }
+        return 300;
+    }
+};
+
 class Bitstream {
 private:
     uint8_t bit_offset;
@@ -407,7 +431,6 @@ public:
 
 //implement deflate itself
     //-add use of extra bits
-    //-simplify generation of fixed huffman trees
     //-construct dynamic huffman tree for block
 //implement rest of inflate
 //add error checking and maybe test files lol
@@ -458,6 +481,11 @@ private:
         }
         return fixed_codes;
     }
+
+    static HuffmanTree generateFixedHuffman () {
+        std::vector <Code> fixed_codes = generateFixedCodes();
+        return HuffmanTree(fixed_codes);
+    }
     static std::vector <Code> generateFixedDistanceCodes () {
         std::vector <Code> fixed_codes;
         uint8_t extra_bits = 0;
@@ -471,6 +499,10 @@ private:
         return fixed_codes;
     }
 
+    static HuffmanTree generateFixedDistanceHuffman () {
+        std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
+        return HuffmanTree(fixed_dist_codes);
+    }
     static std::streampos getFileSize (std::string file) {
         std::streampos fsize = 0;
         std::ifstream fi (file, std::ios::binary);
@@ -488,6 +520,32 @@ private:
     };
 
 
+    static RangeLookup generateLengthLookup () {
+        RangeLookup rl;
+        rl.addRange({11, 12, 265});
+        rl.addRange({13, 14, 266});
+        rl.addRange({15, 16, 267});
+        rl.addRange({17, 18, 268});
+        rl.addRange({19, 22, 269});
+        rl.addRange({23, 26, 270});
+        rl.addRange({27, 30, 271});
+        rl.addRange({31, 34, 272});
+        rl.addRange({35, 42, 273});
+        rl.addRange({43, 50, 274});
+        rl.addRange({51, 58, 275});
+        rl.addRange({59, 66, 276});
+        rl.addRange({67, 82, 277});
+        rl.addRange({83, 98, 278});
+        rl.addRange({99, 114, 279});
+        rl.addRange({115, 130, 280});
+        rl.addRange({131, 162, 281});
+        rl.addRange({163, 194, 282});
+        rl.addRange({195, 226, 283});
+        rl.addRange({227, 257, 284});
+        rl.addRange({258, 258, 285});
+        return rl;
+    }
+
     // deflate
 
     static Bitstream compressBuffer (std::vector<uint8_t> buffer, HuffmanTree tree, bool final) {
@@ -497,6 +555,7 @@ private:
         std::sort(matches.begin(), matches.end(), match_index_comp());
         // compress into huffman code format
         Bitstream bs;
+        RangeLookup rl = generateLengthLookup();
         uint32_t pre = 0b01;
         // writing the block out to file
         if (final) {
@@ -506,9 +565,19 @@ private:
         for (uint32_t i = 0; i < buffer.size(); i++) {
             if (matches.size() > 0 && i == matches[0].offset) {
                 // output the code for the thing
-                Code c = tree.getCompressedCode(254 + matches[0].length); //this is temp way to lookup 
+                uint16_t lookup = 265;
+                if (matches[0].length < 11) {
+                    lookup = 254 + matches[0].length;
+                } else {
+                    lookup = rl.lookup(matches[0].length);
+                }
+
+                Code c = tree.getCompressedCode(lookup); //this is temp way to lookup 
                 bs.addBits(c.code, c.len);
                 // add extra bits to bitstream
+                if (c.extra_bits > 0) {
+                    
+                }
                 matches.erase(matches.begin());
             } else {
                 Code c = tree.getCompressedCode((uint32_t)buffer[i]);
@@ -548,7 +617,7 @@ public:
     Deflate (const Deflate&& def) {
 
     }
-    //need struct to represent distance codes and their extra bits/lengths
+    // not done
     static void inflate (std::string file_path, std::string new_file) {
         //creating default huffman tree
         std::vector <Code> fixed_codes = generateFixedCodes();
@@ -615,7 +684,7 @@ public:
         nf.close();
     }
 
-    //rewrite the file reading to be proper
+    // not done
     static void deflate (std::string file_path, std::string new_file) {
         std::streampos sp = getFileSize(file_path);
         std::ifstream fi;
@@ -628,10 +697,8 @@ public:
         if (!of) {
             return;
         }
-        std::vector <Code> fixed_codes = generateFixedCodes();
-        std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
-        HuffmanTree fixed_huffman(fixed_codes);
-        HuffmanTree fixed_dist_huffman(fixed_dist_codes);
+        HuffmanTree fixed_dist_huffman = generateFixedDistanceHuffman();
+        HuffmanTree fixed_huffman = generateFixedHuffman();
         uint8_t c;
         bool q = false;
         std::vector<uint8_t> buffer;
