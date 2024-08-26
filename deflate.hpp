@@ -95,6 +95,7 @@ class HuffmanTree{
             //check if on last ptr
             if (bit_offset == 0) {
                 ptr->value = m.value;
+                ptr->extra_bits = m.extra_bits;
                 ptr->code = m.code;
                 ptr->len = m.len;
                 break;
@@ -340,14 +341,14 @@ class LZ77 {
     }
 };
 
+struct Range {
+    uint32_t start;
+    uint32_t end;
+    uint32_t code;
+};
 
 class RangeLookup {
 private:
-    struct Range {
-        uint32_t start;
-        uint32_t end;
-        uint32_t code;
-    };
     std::vector <Range> ranges;
 public:
     RangeLookup () {
@@ -355,13 +356,13 @@ public:
     void addRange (Range r) {
         ranges.push_back(r);
     }
-    uint32_t lookup (uint32_t length) {
+    Range lookup (uint32_t length) {
         for (Range i : ranges) {
             if (length >= i.start && length <= i.end) {
-                return i.code;
+                return i;
             }
         }
-        return 300;
+        return {0, 0, 0};
     }
 };
 
@@ -429,8 +430,9 @@ public:
 //https://minitoolz.com/tools/online-deflate-compressor/
 //https://github.com/madler/zlib
 
+// https://www.cs.ucdavis.edu/~martel/122a/deflate.html
 //implement deflate itself
-    //-add use of extra bits
+    //-add distance codes for matches
     //-construct dynamic huffman tree for block
 //implement rest of inflate
 //add error checking and maybe test files lol
@@ -522,6 +524,14 @@ private:
 
     static RangeLookup generateLengthLookup () {
         RangeLookup rl;
+        rl.addRange({3, 3, 257});
+        rl.addRange({4, 4, 258});
+        rl.addRange({5, 5, 259});
+        rl.addRange({6, 6, 260});
+        rl.addRange({7, 7, 261});
+        rl.addRange({8, 8, 262});
+        rl.addRange({9, 9, 263});
+        rl.addRange({10, 10, 264});
         rl.addRange({11, 12, 265});
         rl.addRange({13, 14, 266});
         rl.addRange({15, 16, 267});
@@ -559,24 +569,20 @@ private:
         uint32_t pre = 0b01;
         // writing the block out to file
         if (final) {
-            pre |= 4;
+            pre |= 0b100;
         }
         bs.addBits(pre, 3);
         for (uint32_t i = 0; i < buffer.size(); i++) {
             if (matches.size() > 0 && i == matches[0].offset) {
                 // output the code for the thing
-                uint16_t lookup = 265;
-                if (matches[0].length < 11) {
-                    lookup = 254 + matches[0].length;
-                } else {
-                    lookup = rl.lookup(matches[0].length);
-                }
+                Range lookup = rl.lookup(matches[0].length);
 
-                Code c = tree.getCompressedCode(lookup); //this is temp way to lookup 
+                Code c = tree.getCompressedCode(lookup.code); //this is temp way to lookup 
                 bs.addBits(c.code, c.len);
                 // add extra bits to bitstream
                 if (c.extra_bits > 0) {
-                    
+                    uint32_t extra_bits = matches[0].length % lookup.start;
+                    bs.addBits(extra_bits, c.extra_bits);
                 }
                 matches.erase(matches.begin());
             } else {
