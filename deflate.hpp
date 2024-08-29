@@ -222,18 +222,21 @@ class HuffmanTree{
 
 
 struct Match {
-        uint16_t offset; //offset from match
+        uint16_t offset; //offset from start to match
         uint16_t length; //length of match
         uint8_t follow_code; //code after match
+        int32_t dif; // difference from match to original
         Match () {
             offset = 0;
             length = 0;
             follow_code = 0;
+            dif = 0;
         }
-        Match (uint16_t offset, uint16_t length, uint8_t follow_code) {
+        Match (uint16_t offset, uint16_t length, uint8_t follow_code, int32_t dif) {
             this->offset = offset;
             this->length = length;
             this->follow_code = follow_code;
+            this->dif = dif;
         }
         //do this
         bool overlaps (Match m) {
@@ -260,7 +263,7 @@ class LZ77 {
                 int j;
                 for (j = i; j < window_index && window_index + length < buffer.size() && buffer[j] == buffer[window_index + length]; j++, length++);
                 if (length > 2) {
-                    matches.push_back(Match(i, length, (window_index + length < buffer.size()) ? buffer[window_index + length] : 0));
+                    matches.push_back(Match(i, length, (window_index + length < buffer.size()) ? buffer[window_index + length] : 0, window_index - i));
                 }
             }
         }
@@ -432,7 +435,6 @@ public:
 
 // https://www.cs.ucdavis.edu/~martel/122a/deflate.html
 //implement deflate itself
-    //-add distance codes for matches
     //-construct dynamic huffman tree for block
 //implement rest of inflate
 //add error checking and maybe test files lol
@@ -556,9 +558,44 @@ private:
         return rl;
     }
 
+    static RangeLookup generateDistanceLookup () {
+        RangeLookup rl;
+        rl.addRange({1, 1, 0});
+        rl.addRange({2, 2, 1});
+        rl.addRange({3, 3, 2});
+        rl.addRange({4, 4, 3});
+        rl.addRange({5, 6, 4});
+        rl.addRange({7, 8, 5});
+        rl.addRange({9, 12, 6});
+        rl.addRange({13, 16, 7});
+        rl.addRange({17, 24, 8});
+        rl.addRange({25, 32, 9});
+        rl.addRange({33, 48, 10});
+        rl.addRange({49, 64, 11});
+        rl.addRange({65, 96, 12});
+        rl.addRange({97, 128, 13});
+        rl.addRange({129, 192, 14});
+        rl.addRange({193, 256, 15});
+        rl.addRange({257, 384, 16});
+        rl.addRange({385, 512, 17});
+        rl.addRange({513, 768, 18});
+        rl.addRange({769, 1024, 19});
+        rl.addRange({1025, 1536, 20});
+        rl.addRange({1537, 2048, 21});
+        rl.addRange({2049, 3072, 22});
+        rl.addRange({3073, 4096, 23});
+        rl.addRange({4097, 6144, 24});
+        rl.addRange({6145, 8192, 25});
+        rl.addRange({8193, 12288, 26});
+        rl.addRange({12289, 16384, 27});
+        rl.addRange({16385, 24576, 28});
+        rl.addRange({24577, 32768, 29});
+        return rl;
+    }
+
     // deflate
 
-    static Bitstream compressBuffer (std::vector<uint8_t> buffer, HuffmanTree tree, bool final) {
+    static Bitstream compressBuffer (std::vector<uint8_t> buffer, HuffmanTree tree, HuffmanTree dist_tree, uint32_t preamble, bool final) {
         LZ77 lz(32768);
         // finding the matches above length of 2
         std::vector<Match> matches = lz.findBufferRuns(buffer);
@@ -566,12 +603,10 @@ private:
         // compress into huffman code format
         Bitstream bs;
         RangeLookup rl = generateLengthLookup();
-        uint32_t pre = 0b01;
+        RangeLookup dl = generateDistanceLookup();
         // writing the block out to file
-        if (final) {
-            pre |= 0b100;
-        }
-        bs.addBits(pre, 3);
+        uint32_t pre = (final) ? (preamble | 0b100) : preamble; 
+        bs.addBits(preamble, 3);
         for (uint32_t i = 0; i < buffer.size(); i++) {
             if (matches.size() > 0 && i == matches[0].offset) {
                 // output the code for the thing
@@ -583,6 +618,13 @@ private:
                 if (c.extra_bits > 0) {
                     uint32_t extra_bits = matches[0].length % lookup.start;
                     bs.addBits(extra_bits, c.extra_bits);
+                }
+                Range dist = dl.lookup(matches[0].dif);
+                Code dic = dist_tree.getCompressedCode(dist.code);
+                bs.addBits(dic.code, dic.len);
+                if (dic.extra_bits > 0) {
+                    uint32_t extra_bits = matches[0].dif % dist.start;
+                    bs.addBits(extra_bits, dic.extra_bits);
                 }
                 matches.erase(matches.begin());
             } else {
@@ -719,12 +761,11 @@ public:
                     q = true;
                 }
                 std::vector<uint8_t> output_buffer;
-                Bitstream bs_fixed = compressBuffer(buffer, fixed_huffman, q);
-                Bitstream uncompressed = makeUncompressedBlock(buffer, q);
-                if (bs_fixed.getSize() < uncompressed.getSize()) {
+                Bitstream bs_fixed = compressBuffer(buffer, fixed_huffman, fixed_dist_huffman, 0b001, q);
+                if (bs_fixed.getSize() < (buffer.size() + 5)) {
                     output_buffer = bs_fixed.getData();
                 } else {
-                    output_buffer = uncompressed.getData();
+                    output_buffer = makeUncompressedBlock(buffer, q).getData();
                 }
                 // compare size of bs
                 for (auto& i : output_buffer) {

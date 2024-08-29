@@ -25,8 +25,4 @@ int main(){
     
     Deflate::deflate("Test-export.txt", "Test-export.comp");
 
-    Match m1(32, 5, 'c');
-    Match m2(34, 2, 'h');
-    std::cout << "Overlaps: " << m1.overlaps(m2) << "\n";
-
 }
