@@ -1,7 +1,9 @@
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <fstream>
 #include <memory>
+#include <utility>
 #include <vector>
 #include <algorithm>
 #include <string>
@@ -416,6 +418,37 @@ public:
         return data.size();
     }
 };
+// https://pzs.dstu.dp.ua/ComputerGraphics/ic/bibl/huffman.pdf
+class CodeMap {
+private:
+    uint32_t codes[300];
+public:
+    CodeMap () {
+        std::memset(codes, 0, sizeof(uint32_t) * 300);
+    }
+    CodeMap (const CodeMap& c) {
+        std::memcpy(codes, c.codes, sizeof(uint32_t) * 300);
+    }
+    void addOccur (uint32_t code) {
+        if (code < 300) {
+            codes[code] += 1;
+        }
+    }
+    uint32_t getOccur (uint32_t code) {
+        if (code < 300) {
+            return codes[code];
+        }
+        return 0;
+    }
+    std::vector<Code> generateCodes () {
+        std::vector <Code> out_codes;
+        for (int i = 0; i < 300; i++) {
+            if (getOccur(codes[i])) {
+                
+            }
+        }
+    }
+};
 
 /*
     * Data elements are packed into bytes in order of
@@ -595,18 +628,14 @@ private:
 
     // deflate
 
-    static Bitstream compressBuffer (std::vector<uint8_t> buffer, HuffmanTree tree, HuffmanTree dist_tree, uint32_t preamble, bool final) {
-        LZ77 lz(32768);
-        // finding the matches above length of 2
-        std::vector<Match> matches = lz.findBufferRuns(buffer);
-        std::sort(matches.begin(), matches.end(), match_index_comp());
+    static Bitstream compressBuffer (std::vector<uint8_t>& buffer, std::vector<Match>& matches, HuffmanTree tree, HuffmanTree dist_tree, uint32_t preamble, bool final) {
         // compress into huffman code format
         Bitstream bs;
         RangeLookup rl = generateLengthLookup();
         RangeLookup dl = generateDistanceLookup();
         // writing the block out to file
         uint32_t pre = (final) ? (preamble | 0b100) : preamble; 
-        bs.addBits(preamble, 3);
+        bs.addBits(pre, 3);
         for (uint32_t i = 0; i < buffer.size(); i++) {
             if (matches.size() > 0 && i == matches[0].offset) {
                 // output the code for the thing
@@ -637,7 +666,7 @@ private:
         return bs;
     }
 
-    static Bitstream makeUncompressedBlock (std::vector<uint8_t> buffer, bool final) {
+    static Bitstream makeUncompressedBlock (std::vector<uint8_t>& buffer, bool final) {
         Bitstream bs;
         uint8_t pre = 0b000;
         if (final) {
@@ -650,6 +679,26 @@ private:
         return bs;
     }
 
+    static std::pair<HuffmanTree, HuffmanTree> constructDynamicHuffmanTree (std::vector<uint8_t>& buffer, std::vector<Match> matches) {
+        CodeMap c_map; 
+        CodeMap dist_codes;
+        RangeLookup rl = generateLengthLookup();
+        RangeLookup dl = generateDistanceLookup();
+        for (uint32_t i = 0; i < buffer.size(); i++) {
+            if (i == matches[0].offset) {
+                Range lookup = rl.lookup(matches[0].length);
+                Range dist = dl.lookup(matches[0].dif);
+                c_map.addOccur(lookup.code);
+                dist_codes.addOccur(dist.code);
+                matches.erase(matches.begin());
+            } else {
+                c_map.addOccur(i);
+            }
+        }
+        HuffmanTree tree(c_map.generateCodes());
+        HuffmanTree dist_tree(dist_codes.generateCodes());
+        return std::pair<HuffmanTree, HuffmanTree> (tree, dist_tree);
+    }
 public:
     Deflate () {
 
@@ -760,8 +809,15 @@ public:
                 if (p <= 0) {
                     q = true;
                 }
+                LZ77 lz(32768);
+                // finding the matches above length of 2
+                std::vector<Match> matches = lz.findBufferRuns(buffer);
+                std::sort(matches.begin(), matches.end(), match_index_comp());
+
                 std::vector<uint8_t> output_buffer;
-                Bitstream bs_fixed = compressBuffer(buffer, fixed_huffman, fixed_dist_huffman, 0b001, q);
+                std::pair<HuffmanTree, HuffmanTree> trees = constructDynamicHuffmanTree(buffer, matches);
+
+                Bitstream bs_fixed = compressBuffer(buffer, matches, fixed_huffman, fixed_dist_huffman, 0b001, q);
                 if (bs_fixed.getSize() < (buffer.size() + 5)) {
                     output_buffer = bs_fixed.getData();
                 } else {
