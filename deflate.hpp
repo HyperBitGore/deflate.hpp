@@ -418,6 +418,7 @@ public:
         return data.size();
     }
 };
+// https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
 // https://pzs.dstu.dp.ua/ComputerGraphics/ic/bibl/huffman.pdf
 class CodeMap {
 private:
