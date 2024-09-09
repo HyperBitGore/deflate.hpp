@@ -1,3 +1,4 @@
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -441,13 +442,39 @@ public:
         }
         return 0;
     }
-    std::vector<Code> generateCodes () {
-        std::vector <Code> out_codes;
-        for (int i = 0; i < 300; i++) {
-            if (getOccur(codes[i])) {
-                
+    std::vector<Code> generateCodes () {   
+        struct t_code {
+            uint32_t occurs;
+            uint32_t value;
+        };
+        std::vector <t_code> temp_codes;
+        for (uint32_t i = 0; i < 300; i++) {
+            uint32_t occurs = getOccur(i);
+            if (occurs) {
+                std::cout << "hit: " << i << ", occurs: " << occurs << "\n";
+                temp_codes.push_back({occurs, i});
             }
         }
+
+        struct compare_tcode {
+            inline bool operator() (const t_code& t1, const t_code& t2) {
+                return t1.occurs > t2.occurs;
+            }
+        };
+        std::sort(temp_codes.begin(), temp_codes.end(), compare_tcode());
+        int32_t len = 2;
+        uint32_t code = 0;
+        std::vector <Code> out_codes;
+        for (t_code i : temp_codes) {
+             // check if len needs to be increased for this one, so if the amount has surpassed the allowed number of codes of the bits
+            uint32_t allowed = std::pow(2, len);
+            if (code + 1 > allowed) {
+                len++;
+            }
+            out_codes.push_back({(uint16_t)code, len, 0, (uint16_t)i.value});
+            code++;
+        }
+        return out_codes;
     }
 };
 
@@ -469,9 +496,10 @@ public:
 
 // https://www.cs.ucdavis.edu/~martel/122a/deflate.html
 //implement deflate itself
-    //-construct dynamic huffman tree for block
+    //-write dynamic huffman tree to block
 //implement rest of inflate
 //add error checking and maybe test files lol
+//make sure other deflate implementations can read my compressed blocks
 class Deflate{
 private:
     //from right to left
@@ -637,6 +665,9 @@ private:
         // writing the block out to file
         uint32_t pre = (final) ? (preamble | 0b100) : preamble; 
         bs.addBits(pre, 3);
+        if ((preamble & 0b010) == 2) {
+            writeDynamicHuffmanTree(bs, tree, dist_tree);
+        }
         for (uint32_t i = 0; i < buffer.size(); i++) {
             if (matches.size() > 0 && i == matches[0].offset) {
                 // output the code for the thing
@@ -693,28 +724,18 @@ private:
                 dist_codes.addOccur(dist.code);
                 matches.erase(matches.begin());
             } else {
-                c_map.addOccur(i);
+                c_map.addOccur(buffer[i]);
             }
         }
         HuffmanTree tree(c_map.generateCodes());
         HuffmanTree dist_tree(dist_codes.generateCodes());
         return std::pair<HuffmanTree, HuffmanTree> (tree, dist_tree);
     }
+
+    static void writeDynamicHuffmanTree (Bitstream bs, HuffmanTree tree, HuffmanTree dist_tree) {
+
+    }
 public:
-    Deflate () {
-
-    }
-    ~Deflate () {
-
-    }
-    //copy constructor
-    Deflate (const Deflate& def) {
-
-    }
-    //move constructor
-    Deflate (const Deflate&& def) {
-
-    }
     // not done
     static void inflate (std::string file_path, std::string new_file) {
         //creating default huffman tree
@@ -819,8 +840,11 @@ public:
                 std::pair<HuffmanTree, HuffmanTree> trees = constructDynamicHuffmanTree(buffer, matches);
 
                 Bitstream bs_fixed = compressBuffer(buffer, matches, fixed_huffman, fixed_dist_huffman, 0b001, q);
-                if (bs_fixed.getSize() < (buffer.size() + 5)) {
+                Bitstream bs_dynamic = compressBuffer(buffer, matches, trees.first, trees.second, 0b010, q);
+                if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() < bs_dynamic.getSize()) {
                     output_buffer = bs_fixed.getData();
+                } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
+                    output_buffer = bs_dynamic.getData();
                 } else {
                     output_buffer = makeUncompressedBlock(buffer, q).getData();
                 }
