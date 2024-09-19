@@ -1,4 +1,5 @@
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -146,6 +147,19 @@ class HuffmanTree{
         }
         return {0, -1, 0, 300};
     }
+
+    void decodeCodes (std::vector<Code>& codes, std::shared_ptr<Member> ptr) {
+        if (ptr->len != -1) {
+            codes.push_back({ptr->code, ptr->len, ptr->extra_bits, ptr->value});
+        }
+        if (ptr->left != nullptr) {
+            decodeCodes(codes, ptr->left);
+        }
+        if (ptr->right != nullptr) {
+            decodeCodes(codes, ptr->right);
+        }
+
+    }
     public:
     HuffmanTree () {
         head = nullptr;
@@ -206,6 +220,13 @@ class HuffmanTree{
 
 
         return true;
+    }
+    // returns the codes that makeup the tree
+    std::vector<Code> decode () {
+        std::vector<Code> codes;
+        decodeCodes(codes, head);
+
+        return codes;
     }
 
     std::string flatten () {
@@ -498,8 +519,9 @@ public:
 //implement deflate itself
     //-write dynamic huffman tree to block
 //implement rest of inflate
-//add error checking and maybe test files lol
 //make sure other deflate implementations can read my compressed blocks
+//make it a command line utility
+//add error checking and maybe test files lol
 class Deflate{
 private:
     //from right to left
@@ -657,7 +679,7 @@ private:
 
     // deflate
 
-    static Bitstream compressBuffer (std::vector<uint8_t>& buffer, std::vector<Match>& matches, HuffmanTree tree, HuffmanTree dist_tree, uint32_t preamble, bool final) {
+    static Bitstream compressBuffer (std::vector<uint8_t>& buffer, std::vector<Match> matches, HuffmanTree tree, HuffmanTree dist_tree, uint32_t preamble, bool final) {
         // compress into huffman code format
         Bitstream bs;
         RangeLookup rl = generateLengthLookup();
@@ -666,7 +688,7 @@ private:
         uint32_t pre = (final) ? (preamble | 0b100) : preamble; 
         bs.addBits(pre, 3);
         if ((preamble & 0b010) == 2) {
-            writeDynamicHuffmanTree(bs, tree, dist_tree);
+            writeDynamicHuffmanTree(bs, matches, tree, dist_tree);
         }
         for (uint32_t i = 0; i < buffer.size(); i++) {
             if (matches.size() > 0 && i == matches[0].offset) {
@@ -732,8 +754,21 @@ private:
         return std::pair<HuffmanTree, HuffmanTree> (tree, dist_tree);
     }
 
-    static void writeDynamicHuffmanTree (Bitstream bs, HuffmanTree tree, HuffmanTree dist_tree) {
-
+    static void writeDynamicHuffmanTree (Bitstream& bs, std::vector<Match>& matches, HuffmanTree tree, HuffmanTree dist_tree) {
+        uint32_t write = 0;
+        std::vector<uint32_t> lengths;
+        for (auto& i : matches) {
+            auto fi = std::find(lengths.begin(), lengths.end(), i.length);
+            if (fi == std::end(lengths) || lengths.empty()) {
+                lengths.push_back(i.length);
+            }
+        }
+        write = lengths.size();
+        bs.addBits(write, 5);
+        std::vector<Code> tree_codes= tree.decode();
+        std::vector<Code> dist_codes = dist_tree.decode();
+        write = dist_codes.size();
+        bs.addBits(write, 5);
     }
 public:
     // not done
