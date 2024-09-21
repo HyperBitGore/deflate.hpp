@@ -499,6 +499,102 @@ public:
     }
 };
 
+class DynamicHuffLengthCompressor {
+private:
+    std::vector<Code> codes;
+
+    uint32_t countRepeats (std::vector<uint8_t>& bytes, uint32_t index) {
+        uint32_t count = 0;
+        for (uint32_t i = index + 1; i < bytes.size(); i++) {
+            if (bytes[i] == index) {
+                count++;
+            } else {
+                return count;
+            }
+        }
+        return count;
+    }
+public:
+    DynamicHuffLengthCompressor() {
+        codes = {
+            {0, 3, 2, 16},
+            {0, 3, 3, 17},
+            {0, 3, 7, 18},
+            {0, 3, 0, 0},
+            {0, 3, 0, 8},
+            {0, 3, 0, 7},
+            {0, 3, 0, 9},
+            {0, 3, 0, 6},
+            {0, 3, 0, 10},
+            {0, 3, 0, 5},
+            {0, 3, 0, 11},
+            {0, 3, 0, 4},
+            {0, 3, 0, 12},
+            {0, 3, 0, 3},
+            {0, 3, 0, 13},
+            {0, 3, 0, 2},
+            {0, 3, 0, 14},
+            {0, 3, 0, 1},
+            {0, 3, 0, 15},
+        };
+    }
+
+    Bitstream compress (uint32_t len_max, HuffmanTree huff, HuffmanTree dist) {
+        std::vector<uint8_t> bytes;
+        std::vector<Code> huff_codes = huff.decode();
+        // constructing raw bytes of the table
+        struct compare_code_value {
+            inline bool operator() (const Code& code1, const Code& code2) {
+                return code1.value < code2.value;
+            }
+        };
+        std::sort(huff_codes.begin(), huff_codes.end(), compare_code_value());
+        for (uint32_t i = 0; i < 257 + len_max; i++) {
+            bool write = false;
+            for (auto& j : huff_codes) {
+                if (((uint32_t)j.value) == i) {
+                    bytes.push_back(j.len);
+                    write = true;
+                    break;
+                }
+            } 
+            if (!write) {
+                bytes.push_back(0);
+            }
+        }
+        std::vector<Code> dist_codes = dist.decode();
+        std::sort(dist_codes.begin(), dist_codes.end(), compare_code_value());
+        uint32_t max = dist_codes[dist_codes.size() - 1].value;
+        for (uint32_t i = 0; i < 1 + max; i++) {
+            bool write = false;
+            for (auto& j : dist_codes) {
+                if (j.value == i) {
+                    bytes.push_back(j.len);
+                    write = true;
+                    break;
+                }
+            }
+            if (!write) {
+                bytes.push_back(0);
+            }
+        }
+        Bitstream bs;
+        // compressing the table
+        // for each byte we loop forward and see how many times it's repeated
+        // depending on many times repeated we determine the proper code to use for that length of bytes
+        for (uint32_t i = 0; i < bytes.size(); i++) {
+            uint32_t reps = countRepeats(bytes, i);
+            if (bytes[i] == 0) {
+                
+            } else {
+
+            }
+        }
+        return bs;
+    }
+};
+
+
 /*
     * Data elements are packed into bytes in order of
     increasing bit number within the byte, i.e., starting
@@ -518,6 +614,7 @@ public:
 // https://www.cs.ucdavis.edu/~martel/122a/deflate.html
 //implement deflate itself
     //-write dynamic huffman tree to block
+        // -compress the dynamic tree block
 //implement rest of inflate
 //make sure other deflate implementations can read my compressed blocks
 //make it a command line utility
@@ -734,7 +831,8 @@ private:
     }
 
     static std::pair<HuffmanTree, HuffmanTree> constructDynamicHuffmanTree (std::vector<uint8_t>& buffer, std::vector<Match> matches) {
-        CodeMap c_map; 
+        CodeMap c_map;
+        c_map.addOccur(256);
         CodeMap dist_codes;
         RangeLookup rl = generateLengthLookup();
         RangeLookup dl = generateDistanceLookup();
@@ -755,20 +853,30 @@ private:
     }
 
     static void writeDynamicHuffmanTree (Bitstream& bs, std::vector<Match>& matches, HuffmanTree tree, HuffmanTree dist_tree) {
-        uint32_t write = 0;
-        std::vector<uint32_t> lengths;
+        uint32_t matches_size = matches[0].length;
         for (auto& i : matches) {
-            auto fi = std::find(lengths.begin(), lengths.end(), i.length);
-            if (fi == std::end(lengths) || lengths.empty()) {
-                lengths.push_back(i.length);
+            if (i.length > matches_size) {
+                matches_size = i.length;
             }
         }
-        write = lengths.size();
-        bs.addBits(write, 5);
+        // HLIT
+        bs.addBits(matches_size, 5);
         std::vector<Code> tree_codes= tree.decode();
         std::vector<Code> dist_codes = dist_tree.decode();
-        write = dist_codes.size();
-        bs.addBits(write, 5);
+        uint32_t dist_codes_size = 0;
+        if (dist_codes.size() > 0) {
+        dist_codes_size = dist_codes[0].value;
+            for (auto& i : dist_codes) {
+                if (i.value > dist_codes_size) {
+                    dist_codes_size = i.value;
+                }
+            }
+        }
+        // HDIST
+        bs.addBits(dist_codes_size, 5);
+        // compress the code lengths and use that to generate the HCLEN
+        DynamicHuffLengthCompressor compressor;
+        Bitstream bs2 = compressor.compress(matches_size, tree, dist_tree);
     }
 public:
     // not done
