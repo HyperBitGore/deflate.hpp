@@ -506,7 +506,7 @@ private:
     uint32_t countRepeats (std::vector<uint8_t>& bytes, uint32_t index) {
         uint32_t count = 0;
         for (uint32_t i = index + 1; i < bytes.size(); i++) {
-            if (bytes[i] == index) {
+            if (bytes[i] == bytes[index]) {
                 count++;
             } else {
                 return count;
@@ -514,6 +514,32 @@ private:
         }
         return count;
     }
+    HuffmanTree constructTree (std::vector<uint8_t>& bytes) {
+        CodeMap cm;
+        for (uint32_t i = 0; i < bytes.size();) {
+            uint32_t reps = countRepeats(bytes, i);
+            if (reps > 2) {
+                if (bytes[i] == 0) {
+                    if (reps <= 10) {
+                        cm.addOccur(17);
+                        i += reps;
+                    } else {
+                        cm.addOccur(18);
+                        i += (reps <= 138) ? reps : 138;
+                    }
+                } else {
+                    cm.addOccur(16);
+                    i += (reps <= 6) ? reps : 6;
+                }
+            } else {
+                cm.addOccur(bytes[i]);
+                i++;
+            }
+        }
+        std::vector<Code> t_codes = cm.generateCodes();
+        return HuffmanTree(t_codes);
+    }
+
 public:
     DynamicHuffLengthCompressor() {
         codes = {
@@ -578,18 +604,30 @@ public:
                 bytes.push_back(0);
             }
         }
+        // constructing the code length huffman tree
+        // 3 bits for each code length
+        // start by computing how often each code length character will be used
+        HuffmanTree code_tree = constructTree(bytes);
+
         Bitstream bs;
         // compressing the table
         // for each byte we loop forward and see how many times it's repeated
         // depending on many times repeated we determine the proper code to use for that length of bytes
         for (uint32_t i = 0; i < bytes.size(); i++) {
             uint32_t reps = countRepeats(bytes, i);
-            if (bytes[i] == 0) {
-                
+            if (reps > 2) {
+                if (bytes[i] == 0) {
+                    if (reps <= 10) {
+                        
+                    }
+                } else {
+                    
+                }
             } else {
-
+                
             }
         }
+
         return bs;
     }
 };
@@ -615,6 +653,7 @@ public:
 //implement deflate itself
     //-write dynamic huffman tree to block
         // -compress the dynamic tree block
+            // -make the current huffman tree for code lengths have the extra bits
 //implement rest of inflate
 //make sure other deflate implementations can read my compressed blocks
 //make it a command line utility
