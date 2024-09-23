@@ -537,31 +537,54 @@ private:
             }
         }
         std::vector<Code> t_codes = cm.generateCodes();
+        for (auto& i : codes) {
+            for (auto& j : t_codes) {
+                if (i.value == j.value) {
+                    i.code = j.code;
+                    i.len = j.len;
+                    j.extra_bits = i.extra_bits;
+                }
+            }
+        }
         return HuffmanTree(t_codes);
     }
 
+    void writeCodeLengthTree (Bitstream& bs) {
+        uint32_t max = 4;
+        for (uint32_t i = 4; i < codes.size(); i++) {
+            if (codes[i].len > 0) {
+                max = i;
+            }
+        }
+        max = max - 4;
+        bs.addBits(max, 4);
+        for (uint32_t i = 0; i < max + 4; i++) {
+            bs.addBits(codes[i].len, 3);
+        }
+        bs.addBits(0, 4);
+    }
 public:
     DynamicHuffLengthCompressor() {
         codes = {
-            {0, 3, 2, 16},
-            {0, 3, 3, 17},
-            {0, 3, 7, 18},
-            {0, 3, 0, 0},
-            {0, 3, 0, 8},
-            {0, 3, 0, 7},
-            {0, 3, 0, 9},
-            {0, 3, 0, 6},
-            {0, 3, 0, 10},
-            {0, 3, 0, 5},
-            {0, 3, 0, 11},
-            {0, 3, 0, 4},
-            {0, 3, 0, 12},
-            {0, 3, 0, 3},
-            {0, 3, 0, 13},
-            {0, 3, 0, 2},
-            {0, 3, 0, 14},
-            {0, 3, 0, 1},
-            {0, 3, 0, 15},
+            {0, 0, 2, 16},
+            {0, 0, 3, 17},
+            {0, 0, 7, 18},
+            {0, 0, 0, 0},
+            {0, 0, 0, 8},
+            {0, 0, 0, 7},
+            {0, 0, 0, 9},
+            {0, 0, 0, 6},
+            {0, 0, 0, 10},
+            {0, 0, 0, 5},
+            {0, 0, 0, 11},
+            {0, 0, 0, 4},
+            {0, 0, 0, 12},
+            {0, 0, 0, 3},
+            {0, 0, 0, 13},
+            {0, 0, 0, 2},
+            {0, 0, 0, 14},
+            {0, 0, 0, 1},
+            {0, 0, 0, 15},
         };
     }
 
@@ -608,24 +631,42 @@ public:
         // 3 bits for each code length
         // start by computing how often each code length character will be used
         HuffmanTree code_tree = constructTree(bytes);
-
         Bitstream bs;
+        writeCodeLengthTree(bs);
         // compressing the table
         // for each byte we loop forward and see how many times it's repeated
         // depending on many times repeated we determine the proper code to use for that length of bytes
-        for (uint32_t i = 0; i < bytes.size(); i++) {
+        for (uint32_t i = 0; i < bytes.size();) {
             uint32_t reps = countRepeats(bytes, i);
+            uint32_t code = 0;
+            uint32_t inc = 1;
             if (reps > 2) {
                 if (bytes[i] == 0) {
                     if (reps <= 10) {
-                        
+                        code = 17;
+                        inc = (reps < 10) ? reps : 10;
+                    } else {
+                        code = 18;
+                        inc = (reps < 138) ? reps : 138; 
                     }
                 } else {
-                    
+                    code = 16;
+                    inc = (reps <= 6) ? reps : 6;
                 }
             } else {
-                
+                code = bytes[i];
             }
+            Code c = code_tree.getCompressedCode(code);
+            bs.addBits(c.code, c.len);
+            if (c.extra_bits > 0) {
+                uint32_t start = 3;
+                if (c.value == 18) {
+                    start = 11;
+                }
+                uint32_t val = reps - start;
+                bs.addBits(val, c.extra_bits);
+            }
+            i += inc;
         }
 
         return bs;
@@ -651,9 +692,7 @@ public:
 
 // https://www.cs.ucdavis.edu/~martel/122a/deflate.html
 //implement deflate itself
-    //-write dynamic huffman tree to block
-        // -compress the dynamic tree block
-            // -make the current huffman tree for code lengths have the extra bits
+    //-test implementation (use libdeflate or tinydeflate)
 //implement rest of inflate
 //make sure other deflate implementations can read my compressed blocks
 //make it a command line utility
@@ -915,7 +954,7 @@ private:
         bs.addBits(dist_codes_size, 5);
         // compress the code lengths and use that to generate the HCLEN
         DynamicHuffLengthCompressor compressor;
-        Bitstream bs2 = compressor.compress(matches_size, tree, dist_tree);
+        bs.addRawBuffer(compressor.compress(matches_size, tree, dist_tree).getData());
     }
 public:
     // not done
