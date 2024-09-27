@@ -9,3 +9,4 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS On)
 
 
 add_executable(deflate deflate.hpp example.cpp)
+add_subdirectory(test)

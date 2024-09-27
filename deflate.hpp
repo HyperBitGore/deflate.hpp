@@ -472,7 +472,7 @@ public:
         for (uint32_t i = 0; i < 300; i++) {
             uint32_t occurs = getOccur(i);
             if (occurs) {
-                std::cout << "hit: " << i << ", occurs: " << occurs << "\n";
+                // std::cout << "hit: " << i << ", occurs: " << occurs << "\n";
                 temp_codes.push_back({occurs, i});
             }
         }
@@ -694,9 +694,9 @@ public:
 //implement deflate itself
     //-test implementation (use libdeflate or tinydeflate)
 //implement rest of inflate
-//make sure other deflate implementations can read my compressed blocks
 //make it a command line utility
 //add error checking and maybe test files lol
+//optimize
 class Deflate{
 private:
     //from right to left
@@ -1025,23 +1025,24 @@ public:
     }
 
     // not done
-    static void deflate (std::string file_path, std::string new_file) {
+    static size_t deflate (std::string file_path, std::string new_file) {
         std::streampos sp = getFileSize(file_path);
         std::ifstream fi;
         fi.open(file_path, std::ios::binary);
         if (!fi) {
-            return;
+            return 0;
         }
         std::ofstream of;
         of.open(new_file, std::ios::binary);
         if (!of) {
-            return;
+            return 0;
         }
         HuffmanTree fixed_dist_huffman = generateFixedDistanceHuffman();
         HuffmanTree fixed_huffman = generateFixedHuffman();
         uint8_t c;
         bool q = false;
         std::vector<uint8_t> buffer;
+        size_t out_index = 0;
         while (!q) {
             std::streampos p = sp - fi.tellg();
             if (p > 0 && buffer.size() < 32768) {
@@ -1072,6 +1073,7 @@ public:
                 // compare size of bs
                 for (auto& i : output_buffer) {
                     of << i;
+                    out_index++;
                 }
                 buffer.clear();
             }
@@ -1079,5 +1081,49 @@ public:
 
         fi.close();
         of.close();
+        return out_index;
+    }
+
+    static size_t deflate (char* data, size_t data_size, char* out_data, size_t out_data_size) {
+        HuffmanTree fixed_dist_huffman = generateFixedDistanceHuffman();
+        HuffmanTree fixed_huffman = generateFixedHuffman();
+        uint8_t c;
+        bool q = false;
+        std::vector<uint8_t> buffer;
+        size_t index = 0;
+        size_t out_index = 0;
+         while (!q) {
+            for (; index < data_size && buffer.size() < 32768; index++) {
+                buffer.push_back(data[index]);
+            }
+            // writing the block out to file
+            if (index >= data_size) {
+                q = true;
+            }
+            LZ77 lz(32768);
+            // finding the matches above length of 2
+            std::vector<Match> matches = lz.findBufferRuns(buffer);
+            std::sort(matches.begin(), matches.end(), match_index_comp());
+
+            std::vector<uint8_t> output_buffer;
+            std::pair<HuffmanTree, HuffmanTree> trees = constructDynamicHuffmanTree(buffer, matches);
+
+            Bitstream bs_fixed = compressBuffer(buffer, matches, fixed_huffman, fixed_dist_huffman, 0b001, q);
+            Bitstream bs_dynamic = compressBuffer(buffer, matches, trees.first, trees.second, 0b010, q);
+            if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() < bs_dynamic.getSize()) {
+                output_buffer = bs_fixed.getData();
+            } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
+                output_buffer = bs_dynamic.getData();
+            } else {
+                output_buffer = makeUncompressedBlock(buffer, q).getData();
+            }
+            // compare size of bs
+            for (auto& i : output_buffer) {
+                out_data[out_index] = i;
+                out_index++;
+            }
+            buffer.clear();
+        }
+        return out_index;
     }
 };
