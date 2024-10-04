@@ -364,7 +364,7 @@ class LZ77 {
                 prev_matches.erase(prev_matches.begin() + j);
             }
         }
-        return matches;
+        return {};
     }
 };
 
@@ -406,6 +406,9 @@ private:
     uint8_t extract1BitLeft (uint32_t c, uint16_t n) {
         return ((c << n) & 0b10000000000000000000000000000000) >> 31;
     }
+    uint8_t extract1BitLeft (uint8_t c, uint8_t n) {
+        return ((c << n) & 0b10000000) >> 7;
+    }
 public:
     Bitstream () {
         bit_offset = 0;
@@ -428,6 +431,12 @@ public:
             data[offset] |= (bit << bit_offset);
         }
     }
+    void nextByteBoundary () {
+        
+        data.push_back(0);
+        bit_offset = 0;
+        offset++;
+    }
     std::vector<uint8_t> getData () {
         return data;
     }
@@ -437,6 +446,9 @@ public:
         }
     }
     size_t getSize () {
+        if (bit_offset == 0) {
+            return data.size() - 1;
+        }
         return data.size();
     }
 };
@@ -675,14 +687,29 @@ public:
 
 
 /*
-    * Data elements are packed into bytes in order of
-    increasing bit number within the byte, i.e., starting
-    with the least-significant bit of the byte.
-    * Data elements other than Huffman codes are packed
-    starting with the least-significant bit of the data
-    element.
-    * Huffman codes are packed starting with the most-
-    significant bit of the code.
+     However, we describe the compressed block format
+         in below, as a sequence of data elements of various bit
+         lengths, not a sequence of bytes.  We must therefore specify
+         how to pack these data elements into bytes to form the final
+         compressed byte sequence:
+
+             * Data elements are packed into bytes in order of
+               increasing bit number within the byte, i.e., starting
+               with the least-significant bit of the byte.
+             * Data elements other than Huffman codes are packed
+               starting with the least-significant bit of the data
+               element.
+             * Huffman codes are packed starting with the most-
+               significant bit of the code.
+
+         In other words, if one were to print out the compressed data as
+         a sequence of bytes, starting with the first byte at the
+         *right* margin and proceeding to the *left*, with the most-
+         significant bit of each byte on the left as usual, one would be
+         able to parse the result from right to left, with fixed-width
+         elements in the correct MSB-to-LSB order and Huffman codes in
+         bit-reversed order (i.e., with the first bit of the code in the
+         relative LSB position).
 */
 // so reading huffman codes we read left to right versus regular data which is the basic right to left bit read
 // https://www.rfc-editor.org/rfc/rfc1951#page-6
@@ -693,6 +720,9 @@ public:
 // https://www.cs.ucdavis.edu/~martel/122a/deflate.html
 //implement deflate itself
     //-test implementation (use libdeflate or tinydeflate)
+    //-fixed uncompressed buffers being unreadable
+    //-need to fix compressed buffers being unreadable
+    //-maybe order of bits is wrong?
 //implement rest of inflate
 //make it a command line utility
 //add error checking and maybe test files lol
@@ -860,9 +890,10 @@ private:
         RangeLookup rl = generateLengthLookup();
         RangeLookup dl = generateDistanceLookup();
         // writing the block out to file
-        uint32_t pre = (final) ? (preamble | 0b100) : preamble; 
+        uint32_t pre = (final) ? (preamble | 0b001) : preamble; 
         bs.addBits(pre, 3);
-        if ((preamble & 0b010) == 2) {
+        bs.nextByteBoundary();
+        if ((preamble & 0b100) == 4) {
             writeDynamicHuffmanTree(bs, matches, tree, dist_tree);
         }
         for (uint32_t i = 0; i < buffer.size(); i++) {
@@ -899,9 +930,10 @@ private:
         Bitstream bs;
         uint8_t pre = 0b000;
         if (final) {
-            pre |= 4;
+            pre |= 1;
         }
         bs.addBits(pre, 3);
+        bs.nextByteBoundary();
         bs.addBits(buffer.size(), 16);
         bs.addBits(~(buffer.size()), 16);
         bs.addRawBuffer(buffer);
@@ -915,7 +947,7 @@ private:
         RangeLookup rl = generateLengthLookup();
         RangeLookup dl = generateDistanceLookup();
         for (uint32_t i = 0; i < buffer.size(); i++) {
-            if (i == matches[0].offset) {
+            if (matches.size() > 0 && i == matches[0].offset) {
                 Range lookup = rl.lookup(matches[0].length);
                 Range dist = dl.lookup(matches[0].dif);
                 c_map.addOccur(lookup.code);
@@ -931,10 +963,13 @@ private:
     }
 
     static void writeDynamicHuffmanTree (Bitstream& bs, std::vector<Match>& matches, HuffmanTree tree, HuffmanTree dist_tree) {
-        uint32_t matches_size = matches[0].length;
-        for (auto& i : matches) {
-            if (i.length > matches_size) {
-                matches_size = i.length;
+        uint32_t matches_size = 0;
+        if (matches.size() > 0) {
+            matches_size = matches[0].length;
+            for (auto& i : matches) {
+                if (i.length > matches_size) {
+                    matches_size = i.length;
+                }
             }
         }
         // HLIT
@@ -1108,18 +1143,22 @@ public:
             std::vector<uint8_t> output_buffer;
             std::pair<HuffmanTree, HuffmanTree> trees = constructDynamicHuffmanTree(buffer, matches);
 
-            Bitstream bs_fixed = compressBuffer(buffer, matches, fixed_huffman, fixed_dist_huffman, 0b001, q);
-            Bitstream bs_dynamic = compressBuffer(buffer, matches, trees.first, trees.second, 0b010, q);
+            Bitstream bs_fixed = compressBuffer(buffer, matches, fixed_huffman, fixed_dist_huffman, 0b010, q);
+            Bitstream bs_dynamic = compressBuffer(buffer, matches, trees.first, trees.second, 0b100, q);
+            Bitstream bs_out;
             if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() < bs_dynamic.getSize()) {
-                output_buffer = bs_fixed.getData();
+                bs_out = bs_fixed;
             } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
-                output_buffer = bs_dynamic.getData();
+                bs_out = bs_fixed;
             } else {
-                output_buffer = makeUncompressedBlock(buffer, q).getData();
+                bs_out = makeUncompressedBlock(buffer, q);
             }
+            // Bitstream bs_store = makeUncompressedBlock(buffer, q);
+            // output_buffer = bs_store.getData();
             // compare size of bs
-            for (auto& i : output_buffer) {
-                out_data[out_index] = i;
+            output_buffer = bs_out.getData();
+            for (int32_t i = 0; i < bs_out.getSize(); i++) {
+                out_data[out_index] = output_buffer[i];
                 out_index++;
             }
             buffer.clear();

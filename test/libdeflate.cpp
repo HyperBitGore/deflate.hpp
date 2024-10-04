@@ -19,7 +19,7 @@ int main () {
     file.read(data, 32490);
 
     size_t sizef = file.gcount();
-    libdeflate_compressor* compressor = libdeflate_alloc_compressor(9);
+    libdeflate_compressor* compressor = libdeflate_alloc_compressor(1);
     char out_data_lib[32490];
     //testing the two
     size_t size_lib = libdeflate_deflate_compress(compressor, data, sizef, out_data_lib, 32490);
