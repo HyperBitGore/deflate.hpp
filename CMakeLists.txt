@@ -8,5 +8,5 @@ set(CMAKE_CXX_EXTENSIONS Off)
 set(CMAKE_EXPORT_COMPILE_COMMANDS On)
 
 
-add_executable(deflate deflate.hpp example.cpp)
+add_executable(deflate include/deflate.hpp include/common.hpp include/inflate.hpp test/example.cpp)
 add_subdirectory(test)
