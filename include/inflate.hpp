@@ -3,7 +3,6 @@
 
 
 
-//write wrapper for reading bits from void*
 //decode dynamic tree
 //decode length distance pairs
 //make sure proper inflation of data
@@ -11,21 +10,23 @@
 class inflate : deflate_compressor {
     private:
 
-    static std::pair<HuffmanTree, HuffmanTree> decodeTree (uint8_t* data, uint32_t offset, uint8_t bit_offset, size_t size) {
+    static std::pair<HuffmanTree, HuffmanTree> decodeTree (Bitwrapper& data) {
         std::vector<Code> codes;
         std::vector<Code> dist_codes;
-        
+        uint32_t hlit = (data.readBits(5));
+        uint32_t hdist = data.readBits(5);
+        uint32_t hclen = data.readBits(4);
 
 
         return std::pair<HuffmanTree, HuffmanTree>();
     }
 
-    static std::vector<uint8_t> decompressHuffmanBlock (uint8_t* data, uint32_t offset, uint8_t bit_offset, size_t size, HuffmanTree tree, HuffmanTree dist_tree) {
+    static std::vector<uint8_t> decompressHuffmanBlock (Bitwrapper& data, HuffmanTree tree, HuffmanTree dist_tree) {
         std::vector<uint8_t> buffer;
         uint32_t code = 0;
         uint8_t cur_bit = 0;
         while (true) {
-            code |= extract1Bit(data[offset], bit_offset++) << cur_bit;
+            code |= data.readBits(1) << cur_bit;
             cur_bit++;
             Code c = tree.getUncompressedCode(code);
             if (c.value < 256 && cur_bit == c.len) {
@@ -47,7 +48,7 @@ class inflate : deflate_compressor {
 
     // not done
     static size_t decompress (void* in, size_t in_size, void* out, size_t out_size) {
-        uint8_t* data = (uint8_t*)in;
+        Bitwrapper dat = Bitwrapper(in, in_size);
         uint8_t* out_data = (uint8_t*)out;
         //creating default huffman tree
         std::vector <Code> fixed_codes = generateFixedCodes();
@@ -57,39 +58,33 @@ class inflate : deflate_compressor {
         
         uint32_t it = 0;
         uint32_t ot = 0;
-        uint8_t bit = 0;
         while (true) {
-            uint8_t c = data[it];
-            uint8_t final = extract1Bit(c, bit++);
-            uint8_t type = extract1Bit(c, bit) | (extract1Bit(c, bit+1) << 1);
-            bit += 2;
+            uint8_t final = dat.readBits(1);
+            uint8_t type = dat.readBits(2);
             std::vector<uint8_t> buffer;
             HuffmanTree used_tree = fixed_huffman;
             HuffmanTree used_dist = fixed_dist_huffman;
             switch (type) {
                 case 0:
                 {
-                    if (bit != 0) {
-                        bit = 0;
-                        it++;
-                    }
-                    uint16_t len = (data[it + 1] << 8) | data[it + 2];
+                    dat.moveByte(true);
+                    uint16_t len = dat.readBits(16);
                     it += 2;
-                    uint16_t nlen = (data[it + 1] << 8) | data[it + 2];
+                    uint16_t nlen = dat.readBits(16);
                     it += 2;
                     for (size_t i = 0; i < len; i++) {
-                        buffer.push_back(data[it++]);
+                        buffer.push_back(dat.readByte());
                     }
                 }
                 break;
                 case 2:
                     {
-                        std::pair<HuffmanTree, HuffmanTree> trees = decodeTree(data, it, bit, in_size);
+                        std::pair<HuffmanTree, HuffmanTree> trees = decodeTree(dat);
                         used_tree = trees.first;
                         used_dist = trees.second;
                     }
                 case 1:
-                    buffer = decompressHuffmanBlock(data, it, bit, in_size, used_tree, used_dist);
+                    buffer = decompressHuffmanBlock(dat, used_tree, used_dist);
                 break;
             }
             for (auto& i : buffer) {
