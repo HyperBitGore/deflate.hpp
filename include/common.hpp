@@ -13,11 +13,11 @@
 class deflate_compressor {
     protected:
     struct Code {
-    uint16_t code; //actual code
-    int32_t len; //code length
-    uint8_t extra_bits = 0; //extra bits for code
-    uint16_t value; //original value
-};
+        uint16_t code; //actual code
+        int32_t len; //code length
+        uint8_t extra_bits = 0; //extra bits for code
+        uint16_t value; //original value
+    };
 
 //huffman tree class for deflate, put this in private for deflate later
 class HuffmanTree{

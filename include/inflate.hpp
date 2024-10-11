@@ -10,14 +10,53 @@
 class inflate : deflate_compressor {
     private:
 
+    static HuffmanTree readCodeLengthTree (Bitwrapper& data, uint32_t hclen) {
+         std::vector<Code> codes = {
+                {0, 0, 2, 16},
+                {0, 0, 3, 17},
+                {0, 0, 7, 18},
+                {0, 0, 0, 0},
+                {0, 0, 0, 8},
+                {0, 0, 0, 7},
+                {0, 0, 0, 9},
+                {0, 0, 0, 6},
+                {0, 0, 0, 10},
+                {0, 0, 0, 5},
+                {0, 0, 0, 11},
+                {0, 0, 0, 4},
+                {0, 0, 0, 12},
+                {0, 0, 0, 3},
+                {0, 0, 0, 13},
+                {0, 0, 0, 2},
+                {0, 0, 0, 14},
+                {0, 0, 0, 1},
+                {0, 0, 0, 15},
+            };
+        for (uint32_t i = 0; i < hclen + 4; i++) {
+                uint32_t val = data.readBits(3);
+                codes[i].len = val;
+        }
+        std::vector<Code> pruned_codes;
+        for (auto& i : codes) {
+            if (i.len > 0) {
+                pruned_codes.push_back(i);
+            }
+        }
+        return HuffmanTree(pruned_codes);
+    }
+
     static std::pair<HuffmanTree, HuffmanTree> decodeTree (Bitwrapper& data) {
         std::vector<Code> codes;
         std::vector<Code> dist_codes;
         uint32_t hlit = (data.readBits(5));
         uint32_t hdist = data.readBits(5);
         uint32_t hclen = data.readBits(4);
+        HuffmanTree code_len = readCodeLengthTree(data, hclen);
+        std::vector<Code> cod = code_len.decode();
 
-
+        for (uint32_t i = 0; i < 257 + hlit; i++) {
+            
+        }
         return std::pair<HuffmanTree, HuffmanTree>();
     }
 
