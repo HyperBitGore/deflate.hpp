@@ -1,11 +1,34 @@
 #pragma once
 #include "common.hpp"
+#include <cstddef>
+#include <iostream>
+
+/*
+In other words, if one were to print out the compressed data as
+a sequence of bytes, starting with the first byte at the
+*right* margin and proceeding to the *left*, with the most-
+significant bit of each byte on the left as usual, one would be
+able to parse the result from right to left, with fixed-width
+elements in the correct MSB-to-LSB order and Huffman codes in
+bit-reversed order (i.e., with the first bit of the code in the
+relative LSB position).
+*/
+//this is best explanation here
+//https://stackoverflow.com/questions/32419086/the-structure-of-deflate-compressed-block
+//https://github.com/ebiggers/libdeflate/blob/master/lib/decompress_template.h
+//https://github.com/Artexety/inflatecpp/blob/main/source/huffman_decoder.cc#L237
+//https://github.com/madler/infgen
+//https://nevesnunes.github.io/blog/2021/09/29/Decompression-Meddlings.html
 
 
-
+// I might need to be decoding the tree bits, right to left???
+    //header, extra bits LSB-MSB
+    //huffman code MSB-LSB
 //decode dynamic tree
 //decode length distance pairs
 //make sure proper inflation of data
+//  -optimize code reading, make one function in bitwrapper???
+//  -reduce cycles by reading larger blocks of bits?? min length of bits for tree???
 
 class inflate : deflate_compressor {
     private:
@@ -45,6 +68,50 @@ class inflate : deflate_compressor {
         return HuffmanTree(pruned_codes);
     }
 
+    static std::vector<Code> readDynamicTreeCodes (Bitwrapper& data, HuffmanTree code_len, size_t iterations) {
+        std::vector<Code> codes;
+        uint32_t code = 0;
+        int cur_bit = 0;
+        Code last_code = {0, 0, 0, 0};
+        for (uint32_t i = 0; i < iterations;) {
+            code = (code << 1) | data.readBits(1);
+            cur_bit++;
+            Code cc = code_len.getUncompressedCode(code);
+            if (cc.code == code && cc.len == cur_bit && cc.len > 0) {
+                uint32_t repeat;
+                std::cout << cc.value << "\n";
+                switch (cc.value) {
+                    case 16:
+                        repeat = data.readBits(2);
+                        for (size_t j = 0; j < (repeat + 3); j++, i++) {
+                            codes.push_back({0, last_code.value, 0, (uint16_t)i});
+                        }
+                    break;
+                    case 17:
+                        repeat = data.readBits(3);
+                        for (size_t j = 0; j < (repeat + 3); j++, i++) {
+                            codes.push_back({0, 0, 0, (uint16_t)i});
+                        }
+                    break;
+                    case 18:
+                        repeat = data.readBits(7);
+                        for (size_t j = 0; j < (repeat + 11); j++, i++) {
+                            codes.push_back({0, 0, 0, (uint16_t)i});
+                        }
+                    break;
+                    default:
+                        i++;
+                        codes.push_back({0, cc.value, 0, (uint16_t)i});
+                }
+                code = 0;
+                cur_bit = 0;
+                last_code = cc;
+            }
+        }
+        std::cout << "end\n";
+        return codes;
+    }
+
     static std::pair<HuffmanTree, HuffmanTree> decodeTree (Bitwrapper& data) {
         std::vector<Code> codes;
         std::vector<Code> dist_codes;
@@ -54,9 +121,13 @@ class inflate : deflate_compressor {
         HuffmanTree code_len = readCodeLengthTree(data, hclen);
         std::vector<Code> cod = code_len.decode();
 
-        for (uint32_t i = 0; i < 257 + hlit; i++) {
-            
-        }
+        std::vector<Code> litlength = readDynamicTreeCodes(data, code_len, 257 + hlit);
+        HuffmanTree littree = HuffmanTree(litlength);
+        data.moveByte();
+        // distance
+        std::vector<Code> distcodes = readDynamicTreeCodes(data, code_len, 1 + hdist);
+
+        HuffmanTree disttree = HuffmanTree(dist_codes);
         return std::pair<HuffmanTree, HuffmanTree>();
     }
 
@@ -64,6 +135,8 @@ class inflate : deflate_compressor {
         std::vector<uint8_t> buffer;
         uint32_t code = 0;
         uint8_t cur_bit = 0;
+        RangeLookup rl = generateLengthLookup();
+        RangeLookup dl = generateDistanceLookup();
         while (true) {
             code |= data.readBits(1) << cur_bit;
             cur_bit++;
@@ -75,8 +148,35 @@ class inflate : deflate_compressor {
             }
             else if (c.value == 256) {
                 break;
-            } else {
-                // distance code processing
+            } else if (c.value > 256 && cur_bit == c.len) {
+                Range r = rl.findCode(c.value);
+                uint32_t length = r.start;
+                if (r.extra_bits > 0) {
+                    uint32_t extra = data.readBits(r.extra_bits);
+                    length += extra;
+                }
+                // decode dist code
+                uint32_t dist_code = 0;
+                Code dss;
+                for (size_t bits = 0; bits < 16; bits++) {
+                    dist_code |= data.readBits(1) << bits;
+                    Code ds = dist_tree.getUncompressedCode(dist_code);
+                    if (ds.len == (bits+1)) {
+                        dss = ds;
+                        break;
+                    }
+                }
+                // read full distance code
+                Range d = dl.findCode(dss.value);
+                uint32_t distance = d.start;
+                if (dss.extra_bits > 0) {
+                    uint32_t extra = data.readBits(dss.extra_bits);
+                    distance += extra;
+                }
+                // copy the uncompressed data here using the distance length pair
+                for (size_t i = buffer.size() - distance, j = 0; j < length && i < buffer.size(); j++, i++) {
+                    buffer.push_back(buffer[i]);
+                }
             }
 
         }

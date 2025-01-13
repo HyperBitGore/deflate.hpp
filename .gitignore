@@ -7,3 +7,4 @@ gitkey
 *.compressed
 Test-export*
 hpptestinflate.bmp
+libtestdeflate.txt

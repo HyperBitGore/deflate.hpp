@@ -245,6 +245,9 @@ class HuffmanTree{
 
     // already have the input decoded to proper format
     Code getUncompressedCode (uint32_t compressed_code) {
+        if (head == nullptr) {
+            return {};
+        }
         return getCodeFromCompressed(compressed_code, head); 
     }
     // Input is uncompressed code
@@ -382,6 +385,7 @@ struct Range {
     uint32_t start;
     uint32_t end;
     uint32_t code;
+    int extra_bits;
 };
 
 class RangeLookup {
@@ -399,26 +403,34 @@ public:
                 return i;
             }
         }
-        return {0, 0, 0};
+        return {0, 0, 0, -1};
+    }
+    Range findCode (uint32_t code) {
+        for (Range i : ranges) {
+            if (i.code == code) {
+                return i;
+            }
+        }
+        return {0, 0, 0, -1};
     }
 };
+
+//from right to left
+static uint8_t extract1Bit(uint32_t c, uint16_t n) {
+    return (c >> n) & 1;
+}
+static uint8_t extract1BitLeft (uint32_t c, uint16_t n) {
+    return ((c << n) & 0b10000000000000000000000000000000) >> 31;
+}
+static uint8_t extract1BitLeft (uint8_t c, uint8_t n) {
+    return ((c << n) & 0b10000000) >> 7;
+}
 
 class Bitstream {
 private:
     uint8_t bit_offset;
     uint32_t offset;
     std::vector<uint8_t> data;
-    
-    //from right to left
-    uint8_t extract1Bit(uint32_t c, uint16_t n) {
-        return (c >> n) & 1;
-    }
-    uint8_t extract1BitLeft (uint32_t c, uint16_t n) {
-        return ((c << n) & 0b10000000000000000000000000000000) >> 31;
-    }
-    uint8_t extract1BitLeft (uint8_t c, uint8_t n) {
-        return ((c << n) & 0b10000000) >> 7;
-    }
 public:
     Bitstream () {
         bit_offset = 0;
@@ -469,11 +481,14 @@ class Bitwrapper {
     size_t offset = 0;
     uint8_t bit_offset = 0;
     uint8_t* data;
-
+    std::vector<uint8_t> data_clone;
     public:
     Bitwrapper (void* data, size_t size) {
         this->size = size;
         this->data = (uint8_t*)data;
+        for (size_t i = 0; i < size; i++) {
+            data_clone.push_back(this->data[i]);
+        }
     }
     //copy constructor
     Bitwrapper (const Bitwrapper& wrap) {
@@ -481,6 +496,7 @@ class Bitwrapper {
         offset = wrap.size;
         bit_offset = wrap.bit_offset;
         data = wrap.data;
+        data_clone = wrap.data_clone;
     }
 
     uint32_t readBits (uint8_t bits) {
@@ -501,7 +517,27 @@ class Bitwrapper {
         return val;
     }
 
+    uint32_t readBitsMSB (uint8_t bits) {
+        if (bits > 32) {
+            return 0;
+        }
+        uint32_t val = 0;
+        for (uint32_t i = 0; i < bits; i++) {
+            uint32_t b = extract1Bit(data[offset], bit_offset++);
+            val = (val << 1) | b;
+            if (bit_offset > 7) {
+                offset++;
+                if (offset >= size) {
+                    return val;
+                }
+                bit_offset = 0;
+            }
+        }
+        return val;
+    }
+
     uint8_t readByte () {
+        bit_offset = 0;
         return data[offset++];
     }
 
@@ -588,11 +624,6 @@ public:
         return out_codes;
     }
 };
-    
-    //from right to left
-    static uint8_t extract1Bit (uint8_t c, uint8_t n) {
-        return (c >> n) & 1;
-    }
     static std::vector<Code> generateFixedCodes () {
         std::vector <Code> fixed_codes;
         uint16_t i = 0;
@@ -675,71 +706,79 @@ public:
 
     static RangeLookup generateLengthLookup () {
         RangeLookup rl;
-        rl.addRange({3, 3, 257});
-        rl.addRange({4, 4, 258});
-        rl.addRange({5, 5, 259});
-        rl.addRange({6, 6, 260});
-        rl.addRange({7, 7, 261});
-        rl.addRange({8, 8, 262});
-        rl.addRange({9, 9, 263});
-        rl.addRange({10, 10, 264});
-        rl.addRange({11, 12, 265});
-        rl.addRange({13, 14, 266});
-        rl.addRange({15, 16, 267});
-        rl.addRange({17, 18, 268});
-        rl.addRange({19, 22, 269});
-        rl.addRange({23, 26, 270});
-        rl.addRange({27, 30, 271});
-        rl.addRange({31, 34, 272});
-        rl.addRange({35, 42, 273});
-        rl.addRange({43, 50, 274});
-        rl.addRange({51, 58, 275});
-        rl.addRange({59, 66, 276});
-        rl.addRange({67, 82, 277});
-        rl.addRange({83, 98, 278});
-        rl.addRange({99, 114, 279});
-        rl.addRange({115, 130, 280});
-        rl.addRange({131, 162, 281});
-        rl.addRange({163, 194, 282});
-        rl.addRange({195, 226, 283});
-        rl.addRange({227, 257, 284});
-        rl.addRange({258, 258, 285});
+        rl.addRange({3, 3, 257, 0});
+        rl.addRange({4, 4, 258, 0});
+        rl.addRange({5, 5, 259, 0});
+        rl.addRange({6, 6, 260, 0});
+        rl.addRange({7, 7, 261, 0});
+        rl.addRange({8, 8, 262, 0});
+        rl.addRange({9, 9, 263, 0});
+        rl.addRange({10, 10, 264, 0});
+        rl.addRange({11, 12, 265, 1});
+        rl.addRange({13, 14, 266, 1});
+        rl.addRange({15, 16, 267, 1});
+        rl.addRange({17, 18, 268, 1});
+        rl.addRange({19, 22, 269, 2});
+        rl.addRange({23, 26, 270, 2});
+        rl.addRange({27, 30, 271, 2});
+        rl.addRange({31, 34, 272, 2});
+        rl.addRange({35, 42, 273, 3});
+        rl.addRange({43, 50, 274, 3});
+        rl.addRange({51, 58, 275, 3});
+        rl.addRange({59, 66, 276, 3});
+        rl.addRange({67, 82, 277, 4});
+        rl.addRange({83, 98, 278, 4});
+        rl.addRange({99, 114, 279, 4});
+        rl.addRange({115, 130, 280, 4});
+        rl.addRange({131, 162, 281, 5});
+        rl.addRange({163, 194, 282, 5});
+        rl.addRange({195, 226, 283, 5});
+        rl.addRange({227, 257, 284, 5});
+        rl.addRange({258, 258, 285, 0});
         return rl;
     }
 
     static RangeLookup generateDistanceLookup () {
         RangeLookup rl;
-        rl.addRange({1, 1, 0});
-        rl.addRange({2, 2, 1});
-        rl.addRange({3, 3, 2});
-        rl.addRange({4, 4, 3});
-        rl.addRange({5, 6, 4});
-        rl.addRange({7, 8, 5});
-        rl.addRange({9, 12, 6});
-        rl.addRange({13, 16, 7});
-        rl.addRange({17, 24, 8});
-        rl.addRange({25, 32, 9});
-        rl.addRange({33, 48, 10});
-        rl.addRange({49, 64, 11});
-        rl.addRange({65, 96, 12});
-        rl.addRange({97, 128, 13});
-        rl.addRange({129, 192, 14});
-        rl.addRange({193, 256, 15});
-        rl.addRange({257, 384, 16});
-        rl.addRange({385, 512, 17});
-        rl.addRange({513, 768, 18});
-        rl.addRange({769, 1024, 19});
-        rl.addRange({1025, 1536, 20});
-        rl.addRange({1537, 2048, 21});
-        rl.addRange({2049, 3072, 22});
-        rl.addRange({3073, 4096, 23});
-        rl.addRange({4097, 6144, 24});
-        rl.addRange({6145, 8192, 25});
-        rl.addRange({8193, 12288, 26});
-        rl.addRange({12289, 16384, 27});
-        rl.addRange({16385, 24576, 28});
-        rl.addRange({24577, 32768, 29});
+        rl.addRange({1, 1, 0, 0});
+        rl.addRange({2, 2, 1, 0});
+        rl.addRange({3, 3, 2, 0});
+        rl.addRange({4, 4, 3, 0});
+        rl.addRange({5, 6, 4, 1});
+        rl.addRange({7, 8, 5, 1});
+        rl.addRange({9, 12, 6, 2});
+        rl.addRange({13, 16, 7, 2});
+        rl.addRange({17, 24, 8, 3});
+        rl.addRange({25, 32, 9, 3});
+        rl.addRange({33, 48, 10, 4});
+        rl.addRange({49, 64, 11, 4});
+        rl.addRange({65, 96, 12, 5});
+        rl.addRange({97, 128, 13, 5});
+        rl.addRange({129, 192, 14, 6});
+        rl.addRange({193, 256, 15, 6});
+        rl.addRange({257, 384, 16, 7});
+        rl.addRange({385, 512, 17, 7});
+        rl.addRange({513, 768, 18, 8});
+        rl.addRange({769, 1024, 19, 8});
+        rl.addRange({1025, 1536, 20, 9});
+        rl.addRange({1537, 2048, 21, 9});
+        rl.addRange({2049, 3072, 22, 10});
+        rl.addRange({3073, 4096, 23, 10});
+        rl.addRange({4097, 6144, 24, 11});
+        rl.addRange({6145, 8192, 25, 11});
+        rl.addRange({8193, 12288, 26, 12});
+        rl.addRange({12289, 16384, 27, 12});
+        rl.addRange({16385, 24576, 28, 13});
+        rl.addRange({24577, 32768, 29, 13});
         return rl;
+    }
+
+    static uint32_t flipBits (uint32_t value, uint8_t max_bit) {
+        uint32_t v = 0;
+        for (uint32_t i = 0, j = max_bit; i <= max_bit; i++, j--) {
+            v |= extract1Bit(value, i) << (j - 1);
+        }
+        return v;
     }
     public:
 

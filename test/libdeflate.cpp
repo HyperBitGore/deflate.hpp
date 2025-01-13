@@ -1,5 +1,6 @@
 #include "../include/deflate.hpp"
 #include "../include/inflate.hpp"
+#include <fstream>
 #include "../build/external/include/libdeflate.h"
 
 
@@ -35,7 +36,7 @@ int main () {
     //testing the two
     size_t size_lib = libdeflate_deflate_compress(compressor, data, sizef, out_data_lib, 32490);
     std::cout << "size of libdeflate: " << size_lib << "\n";
-
+    writeBufferToFile(out_data_lib, size_lib, "libtestdeflate.txt");
 
     size_t sizein_hpp = inflate::decompress(out_data_lib, size_lib, out_data_inhpp, 32490);
     std::cout << "size of inflate.hpp: " << sizein_hpp << "\n";
