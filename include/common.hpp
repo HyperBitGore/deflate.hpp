@@ -12,12 +12,169 @@
 
 class deflate_compressor {
     protected:
+
+    //from right to left
+    static uint8_t extract1Bit(uint32_t c, uint16_t n) {
+        return (c >> n) & 1;
+    }
+    static uint8_t extract1BitLeft (uint32_t c, uint16_t n) {
+        return ((c << n) & 0b10000000000000000000000000000000) >> 31;
+    }
+    static uint8_t extract1BitLeft (uint8_t c, uint8_t n) {
+        return ((c << n) & 0b10000000) >> 7;
+    }
+
     struct Code {
         uint16_t code; //actual code
         int32_t len; //code length
         uint8_t extra_bits = 0; //extra bits for code
         uint16_t value; //original value
     };
+
+    class FlatHuffmanTree {
+        private:
+            struct Member {
+                uint16_t value;
+                uint16_t code;
+                int32_t len;
+                uint8_t extra_bits = 0;
+                int left;
+                int right;
+            };
+            std::vector<Member> members;
+            int head = -1;
+
+            void insert (Code c) {
+                if (head == -1) {
+                    members.push_back({0, 0, -1, 0, -1, -1});
+                    head = 0;
+                }
+                // insert down the line
+                size_t index = 0;
+                uint16_t bit = 0;
+                size_t memb = head;
+                while(bit < c.len) {
+                    uint32_t direction = extract1Bit(c.code, bit);
+                    // left
+                    if (!direction) {
+                        if (members[memb].left == -1) {
+                            members.push_back({0, 0, -1, 0, -1, -1});
+                            members[memb].left = members.size() - 1;
+                        }
+                        memb = members[memb].left;
+                    } else {
+                        //right
+                        if (members[memb].right == -1) {
+                            members.push_back({0, 0, -1, 0, -1, -1});
+                            members[memb].right = members.size() - 1;
+                        }
+                        memb = members[memb].right;
+                    }
+                    bit++;
+                    if (bit == c.len) {
+                        members[memb].code = c.code;
+                        members[memb].extra_bits = c.extra_bits;
+                        members[memb].len = c.len;
+                        members[memb].value = c.value;
+                    }
+                }
+            }
+
+            int16_t countCodeLength (std::vector<Code>& codes, uint32_t length) {
+                uint32_t count = 0;
+                for (uint32_t i = 0; i < codes.size(); i++) {
+                    if (codes[i].len == length) {
+                        count++;
+                    }
+                }
+                return count;
+            }
+
+            void construct (std::vector<Code>& codes) {
+                //sort the codes
+                struct {
+                    bool operator()(Code a, Code b) const { return a.len < b.len; }
+                } compareCodeL;
+                std::sort(codes.begin(), codes.end(), compareCodeL);
+
+                int16_t code = 0;
+                int16_t next_code[16];
+                int16_t bl_count[16];
+                for (uint32_t i = 0; i < 16; i++) {
+                    bl_count[i] = countCodeLength(codes, i);
+                }
+                bl_count[0] = 0;
+                for (int32_t bits = 1; bits <= 15; bits++) {
+                    code = (code + bl_count[bits - 1]) << 1;
+                    next_code[bits] = code;
+                }
+
+                for (int32_t i = 0; i < codes.size(); i++) {
+                    int32_t len = codes[i].len;
+                    codes[i].code = next_code[len];
+                    next_code[len]++;
+                }
+
+                for (size_t i = 0; i < codes.size();) {
+                    insert(codes[0]);
+                    codes.erase(codes.begin());
+                }
+            }
+
+            Member findMemberCode (uint32_t code, int32_t len) {
+                int index = head;
+                uint32_t bit = 0;
+                while (bit < len && index != -1) {
+                    uint32_t direction = extract1Bit(code, bit);
+                    // left
+                    if (!direction) {
+                        index = members[index].left;
+                    } 
+                    // right
+                    else {
+                        index = members[index].right;
+                    }
+                    bit++;
+                }
+                if (index == -1) {
+                    return {0, 0, -1};
+                }
+                return members[index];
+            }
+
+            Member findMemberValue (uint32_t value) {
+                for (size_t i = 0; i < members.size(); i++) {
+                    if (members[i].len != -1 && members[i].value == value) {
+                        return members[i];
+                    }
+                }
+                return {0, 0, -1};
+            }
+        public:
+            FlatHuffmanTree() {
+
+            }
+            FlatHuffmanTree (std::vector<Code> codes){
+                construct(codes);
+            }
+
+            Code getCodeEncoded (uint32_t code, int32_t len) {
+                Member m = findMemberCode(code, len);
+                if (m.len == -1) {
+                    return {0, -1, 0, 0};
+                }
+                return {m.code, m.len, m.extra_bits, m.value};
+            }
+            Code getCodeValue (uint32_t value) {
+                Member m = findMemberValue(value);
+                if (m.len == -1) {
+                    return {0, -1, 0, 0};
+                }
+                return {m.code, m.len, m.extra_bits, m.value};
+            }
+            
+    };
+
 
 //huffman tree class for deflate, put this in private for deflate later
 class HuffmanTree{
@@ -32,10 +189,6 @@ class HuffmanTree{
 
     };
     std::shared_ptr<Member> head;
-    //from right to left
-    uint8_t extract1Bit(uint16_t c, uint16_t n) {
-        return (c >> n) & 1;
-    }
 
     uint32_t extractBits (uint32_t c, uint8_t offset, uint32_t count) {
         uint32_t out = 0;
@@ -414,17 +567,6 @@ public:
         return {0, 0, 0, -1};
     }
 };
-
-//from right to left
-static uint8_t extract1Bit(uint32_t c, uint16_t n) {
-    return (c >> n) & 1;
-}
-static uint8_t extract1BitLeft (uint32_t c, uint16_t n) {
-    return ((c << n) & 0b10000000000000000000000000000000) >> 31;
-}
-static uint8_t extract1BitLeft (uint8_t c, uint8_t n) {
-    return ((c << n) & 0b10000000) >> 7;
-}
 
 class Bitstream {
 private:

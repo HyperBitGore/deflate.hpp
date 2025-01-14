@@ -20,6 +20,7 @@ relative LSB position).
 //https://github.com/madler/infgen
 //https://nevesnunes.github.io/blog/2021/09/29/Decompression-Meddlings.html
 
+// huffman tree construction off for sure
 
 // I might need to be decoding the tree bits, right to left???
     //header, extra bits LSB-MSB
@@ -123,6 +124,7 @@ class inflate : deflate_compressor {
 
         std::vector<Code> litlength = readDynamicTreeCodes(data, code_len, 257 + hlit);
         HuffmanTree littree = HuffmanTree(litlength);
+        FlatHuffmanTree flatlit = FlatHuffmanTree(litlength);
         data.moveByte();
         // distance
         std::vector<Code> distcodes = readDynamicTreeCodes(data, code_len, 1 + hdist);
@@ -192,6 +194,14 @@ class inflate : deflate_compressor {
         //creating default huffman tree
         std::vector <Code> fixed_codes = generateFixedCodes();
         std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
+        FlatHuffmanTree flatFixed(fixed_codes);
+        flatFixed.getCodeEncoded(5, 7);
+        flatFixed.getCodeEncoded(456, 9);
+        flatFixed.getCodeEncoded(511, 9);
+        flatFixed.getCodeValue(272);
+        flatFixed.getCodeValue(0);
+        flatFixed.getCodeValue(54);
+        flatFixed.getCodeValue(203);
         HuffmanTree fixed_huffman(fixed_codes);
         HuffmanTree fixed_dist_huffman(fixed_dist_codes);
         

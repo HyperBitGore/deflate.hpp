@@ -14,29 +14,36 @@ void writeBufferToFile (char* data, size_t size, std::string file_path) {
 }
 
 char data[32490];
+char tiny_data[500];
 char out_data_lib[32490];
+char out_data_lib_tiny [500];
 char out_data_inhpp[32490];
 char out_data_hpp[32490];
 char out_inflate_lib[32490];
+
+size_t readFile (std::string name, char* c, size_t size) {
+    std::ifstream f;
+    f.open(name, std::ios::binary);
+    f.read(c, size);
+    size_t sizef = f.gcount();
+    f.close();
+    return sizef;
+}
 
 int main () {
 
     std::cout << "Libdeflate test!\n";
 
-    std::ifstream file;
-    file.open("test.bmp", std::ios::binary);
-    if (!file) {
-        std::cout << "Error can't open test.bmp file!" << std::endl;
-        return -1;
-    }
-    file.read(data, 32490);
-
-    size_t sizef = file.gcount();
+    size_t sizef = readFile("test.bmp", data, 32490);
+    size_t sizetiny = readFile("tiny.bmp", tiny_data, 500);
     libdeflate_compressor* compressor = libdeflate_alloc_compressor(1);
     //testing the two
     size_t size_lib = libdeflate_deflate_compress(compressor, data, sizef, out_data_lib, 32490);
     std::cout << "size of libdeflate: " << size_lib << "\n";
     writeBufferToFile(out_data_lib, size_lib, "libtestdeflate.txt");
+    // to get fixed huffman used
+    size_t size_lib_tiny = libdeflate_deflate_compress(compressor, tiny_data, sizetiny, out_data_lib_tiny, 500);
+    writeBufferToFile(out_data_lib_tiny, size_lib_tiny, "libtestdeflate_tiny.txt");
 
     size_t sizein_hpp = inflate::decompress(out_data_lib, size_lib, out_data_inhpp, 32490);
     std::cout << "size of inflate.hpp: " << sizein_hpp << "\n";
