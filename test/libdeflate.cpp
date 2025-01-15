@@ -1,6 +1,7 @@
 #include "../include/deflate.hpp"
 #include "../include/inflate.hpp"
 #include <fstream>
+#include <iostream>
 #include "../build/external/include/libdeflate.h"
 
 
@@ -25,7 +26,7 @@ size_t readFile (std::string name, char* c, size_t size) {
     std::ifstream f;
     f.open(name, std::ios::binary);
     f.read(c, size);
-    size_t sizef = f.gcount();
+    size_t sizef = static_cast<size_t>(f.gcount());
     f.close();
     return sizef;
 }

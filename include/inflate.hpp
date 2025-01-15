@@ -135,7 +135,7 @@ class inflate : deflate_compressor {
             cur_bit++;
             Code c = tree.getCodeEncoded(code, cur_bit);
             if (c.value < 256 && cur_bit == c.len) {
-                buffer.push_back(c.value);
+                buffer.push_back((uint8_t)c.value);
                 code = 0;
                 cur_bit = 0;
             }

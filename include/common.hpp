@@ -108,7 +108,7 @@ class deflate_compressor {
                     next_code[bits] = code;
                 }
 
-                for (int32_t i = 0; i < codes.size(); i++) {
+                for (uint32_t i = 0; i < codes.size(); i++) {
                     int32_t len = codes[i].len;
                      if (len != 0) {
                         codes[i].code = next_code[len];
@@ -123,7 +123,7 @@ class deflate_compressor {
                 }
             }
 
-            Member findMemberCode (uint32_t code, int32_t len) {
+            Member findMemberCode (uint32_t code, uint32_t len) {
                 int index = head;
                 uint32_t bit = 0;
                 while (bit < len && index != -1) {
@@ -171,6 +171,9 @@ class deflate_compressor {
             }
 
             Code getCodeEncoded (uint32_t code, int32_t len) {
+                if (len == -1) {
+                    return {0, -1, 0, 0};
+                }
                 Member m = findMemberCode(code, len);
                 if (m.len == -1) {
                     return {0, -1, 0, 0};
@@ -234,7 +237,7 @@ class HuffmanTree{
 
     int32_t findMaxCode (std::vector<Code>& codes) {
         int32_t o = codes[0].code;
-        for (int32_t i = 0; i < codes.size(); i++) {
+        for (size_t i = 0; i < codes.size(); i++) {
             if (codes[i].code > o) {
                 o = codes[i].code;
             }
@@ -389,7 +392,7 @@ class HuffmanTree{
             next_code[bits] = code;
         }
 
-        for (int32_t i = 0; i < membs.size(); i++) {
+        for (uint32_t i = 0; i < membs.size(); i++) {
             int32_t len = membs[i].len;
             membs[i].code = next_code[len];
             next_code[len]++;
@@ -471,19 +474,19 @@ class LZ77 {
     //tries to find longest match, and moves window forward by 1 byte, if no match found, just returns an empty Match
     void findLongestMatch () {
         std::vector<Match> matches;
-        for (int i = window_index - 1; i >= 0; i--) {
+        for (int32_t i = window_index - 1; i >= 0; i--) {
             if (buffer[i] == buffer[window_index]) {
                 uint32_t length = 0;
-                int j;
-                for (j = i; j < window_index && window_index + length < buffer.size() && buffer[j] == buffer[window_index + length]; j++, length++);
+                int32_t j;
+                for (j = i; j < (int32_t)window_index && window_index + length < buffer.size() && buffer[j] == buffer[window_index + length]; j++, length++);
                 if (length > 2) {
                     matches.push_back(Match(i, length, (window_index + length < buffer.size()) ? buffer[window_index + length] : 0, window_index - i));
                 }
             }
         }
-        for (int i = 0; i < matches.size();) {
+        for (size_t i = 0; i < matches.size();) {
             bool er = false;
-            for (int j = 0; j < prev_matches.size() && i < matches.size(); j++) {
+            for (size_t j = 0; j < prev_matches.size() && i < matches.size(); j++) {
                 // when a matches is erased creates issue somehow here
                 if (prev_matches[j].overlaps(matches[i])) {
                     if (prev_matches[j].length < matches[i].length) {
@@ -537,9 +540,9 @@ class LZ77 {
             findLongestMatch();
         }
         //loop through buffer and edit it to compress streaks
-        for (int i = 0; i < buffer.size();) {
+        for (size_t i = 0; i < buffer.size();) {
             bool match = false;
-            int j = 0;
+            size_t j = 0;
             for (; j < prev_matches.size(); j++) {
                 if (prev_matches[j].offset == i) {
                     match = true;
@@ -562,7 +565,7 @@ struct Range {
     uint32_t start;
     uint32_t end;
     uint32_t code;
-    int extra_bits;
+    int32_t extra_bits;
 };
 
 class RangeLookup {
@@ -780,7 +783,7 @@ public:
         std::vector <Code> out_codes;
         for (t_code i : temp_codes) {
              // check if len needs to be increased for this one, so if the amount has surpassed the allowed number of codes of the bits
-            uint32_t allowed = std::pow(2, len);
+            uint32_t allowed = static_cast<uint32_t>(std::pow(2, len));
             if (code + 1 > allowed) {
                 len++;
             }
