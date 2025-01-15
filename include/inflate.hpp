@@ -19,14 +19,12 @@ relative LSB position).
 //https://github.com/Artexety/inflatecpp/blob/main/source/huffman_decoder.cc#L237
 //https://github.com/madler/infgen
 //https://nevesnunes.github.io/blog/2021/09/29/Decompression-Meddlings.html
-
-// huffman tree construction off for sure
+//https://blog.za3k.com/understanding-gzip-2/
 
 // I might need to be decoding the tree bits, right to left???
     //header, extra bits LSB-MSB
     //huffman code MSB-LSB
-//decode dynamic tree
-//decode length distance pairs
+
 //make sure proper inflation of data
 //  -optimize code reading, make one function in bitwrapper???
 //  -reduce cycles by reading larger blocks of bits?? min length of bits for tree???
@@ -34,7 +32,7 @@ relative LSB position).
 class inflate : deflate_compressor {
     private:
 
-    static HuffmanTree readCodeLengthTree (Bitwrapper& data, uint32_t hclen) {
+    static FlatHuffmanTree readCodeLengthTree (Bitwrapper& data, uint32_t hclen) {
          std::vector<Code> codes = {
                 {0, 0, 2, 16},
                 {0, 0, 3, 17},
@@ -60,24 +58,20 @@ class inflate : deflate_compressor {
                 uint32_t val = data.readBits(3);
                 codes[i].len = val;
         }
-        std::vector<Code> pruned_codes;
-        for (auto& i : codes) {
-            if (i.len > 0) {
-                pruned_codes.push_back(i);
-            }
-        }
-        return HuffmanTree(pruned_codes);
+        std::vector<Code> sorted_codes;
+       
+        return FlatHuffmanTree(codes);
     }
 
-    static std::vector<Code> readDynamicTreeCodes (Bitwrapper& data, HuffmanTree code_len, size_t iterations) {
+    static std::vector<Code> readDynamicTreeCodes (Bitwrapper& data, FlatHuffmanTree code_len, size_t iterations) {
         std::vector<Code> codes;
         uint32_t code = 0;
-        int cur_bit = 0;
+        int32_t cur_bit = 0;
         Code last_code = {0, 0, 0, 0};
         for (uint32_t i = 0; i < iterations;) {
             code = (code << 1) | data.readBits(1);
             cur_bit++;
-            Code cc = code_len.getUncompressedCode(code);
+            Code cc = code_len.getCodeEncoded(code, cur_bit);
             if (cc.code == code && cc.len == cur_bit && cc.len > 0) {
                 uint32_t repeat;
                 std::cout << cc.value << "\n";
@@ -101,48 +95,45 @@ class inflate : deflate_compressor {
                         }
                     break;
                     default:
-                        i++;
                         codes.push_back({0, cc.value, 0, (uint16_t)i});
+                        i++;
                 }
                 code = 0;
                 cur_bit = 0;
                 last_code = cc;
             }
         }
-        std::cout << "end\n";
         return codes;
     }
 
-    static std::pair<HuffmanTree, HuffmanTree> decodeTree (Bitwrapper& data) {
-        std::vector<Code> codes;
-        std::vector<Code> dist_codes;
+    static std::pair<FlatHuffmanTree, FlatHuffmanTree> decodeTree (Bitwrapper& data) {
         uint32_t hlit = (data.readBits(5));
         uint32_t hdist = data.readBits(5);
         uint32_t hclen = data.readBits(4);
-        HuffmanTree code_len = readCodeLengthTree(data, hclen);
+        FlatHuffmanTree code_len = readCodeLengthTree(data, hclen);
         std::vector<Code> cod = code_len.decode();
 
+        // literal/length
         std::vector<Code> litlength = readDynamicTreeCodes(data, code_len, 257 + hlit);
-        HuffmanTree littree = HuffmanTree(litlength);
-        FlatHuffmanTree flatlit = FlatHuffmanTree(litlength);
-        data.moveByte();
+        FlatHuffmanTree littree = FlatHuffmanTree(litlength);
+        std::vector<Code> lit_codes = littree.decode();
         // distance
         std::vector<Code> distcodes = readDynamicTreeCodes(data, code_len, 1 + hdist);
 
-        HuffmanTree disttree = HuffmanTree(dist_codes);
-        return std::pair<HuffmanTree, HuffmanTree>();
+        FlatHuffmanTree disttree = FlatHuffmanTree(distcodes);
+        return std::pair<FlatHuffmanTree, FlatHuffmanTree>(littree, disttree);
     }
 
-    static std::vector<uint8_t> decompressHuffmanBlock (Bitwrapper& data, HuffmanTree tree, HuffmanTree dist_tree) {
+    static std::vector<uint8_t> decompressHuffmanBlock (Bitwrapper& data, FlatHuffmanTree tree, FlatHuffmanTree dist_tree) {
         std::vector<uint8_t> buffer;
         uint32_t code = 0;
         uint8_t cur_bit = 0;
         RangeLookup rl = generateLengthLookup();
         RangeLookup dl = generateDistanceLookup();
         while (true) {
-            code |= data.readBits(1) << cur_bit;
+            code = (code << 1) | data.readBits(1);
             cur_bit++;
-            Code c = tree.getUncompressedCode(code);
+            Code c = tree.getCodeEncoded(code, cur_bit);
             if (c.value < 256 && cur_bit == c.len) {
                 buffer.push_back(c.value);
                 code = 0;
@@ -161,8 +152,8 @@ class inflate : deflate_compressor {
                 uint32_t dist_code = 0;
                 Code dss;
                 for (size_t bits = 0; bits < 16; bits++) {
-                    dist_code |= data.readBits(1) << bits;
-                    Code ds = dist_tree.getUncompressedCode(dist_code);
+                    dist_code = (dist_code << 1) | data.readBits(1);
+                    Code ds = dist_tree.getCodeEncoded(dist_code, bits+1);
                     if (ds.len == (bits+1)) {
                         dss = ds;
                         break;
@@ -171,14 +162,15 @@ class inflate : deflate_compressor {
                 // read full distance code
                 Range d = dl.findCode(dss.value);
                 uint32_t distance = d.start;
-                if (dss.extra_bits > 0) {
-                    uint32_t extra = data.readBits(dss.extra_bits);
+                if (d.extra_bits > 0) {
+                    uint32_t extra = data.readBits(d.extra_bits);
                     distance += extra;
                 }
                 // copy the uncompressed data here using the distance length pair
                 for (size_t i = buffer.size() - distance, j = 0; j < length && i < buffer.size(); j++, i++) {
                     buffer.push_back(buffer[i]);
                 }
+                cur_bit = 0;
             }
 
         }
@@ -194,16 +186,8 @@ class inflate : deflate_compressor {
         //creating default huffman tree
         std::vector <Code> fixed_codes = generateFixedCodes();
         std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
-        FlatHuffmanTree flatFixed(fixed_codes);
-        flatFixed.getCodeEncoded(5, 7);
-        flatFixed.getCodeEncoded(456, 9);
-        flatFixed.getCodeEncoded(511, 9);
-        flatFixed.getCodeValue(272);
-        flatFixed.getCodeValue(0);
-        flatFixed.getCodeValue(54);
-        flatFixed.getCodeValue(203);
-        HuffmanTree fixed_huffman(fixed_codes);
-        HuffmanTree fixed_dist_huffman(fixed_dist_codes);
+        FlatHuffmanTree fixed_huffman(fixed_codes);
+        FlatHuffmanTree fixed_dist_huffman(fixed_dist_codes);
         
         uint32_t it = 0;
         uint32_t ot = 0;
@@ -211,8 +195,8 @@ class inflate : deflate_compressor {
             uint8_t final = dat.readBits(1);
             uint8_t type = dat.readBits(2);
             std::vector<uint8_t> buffer;
-            HuffmanTree used_tree = fixed_huffman;
-            HuffmanTree used_dist = fixed_dist_huffman;
+            FlatHuffmanTree used_tree = fixed_huffman;
+            FlatHuffmanTree used_dist = fixed_dist_huffman;
             switch (type) {
                 case 0:
                 {
@@ -228,7 +212,7 @@ class inflate : deflate_compressor {
                 break;
                 case 2:
                     {
-                        std::pair<HuffmanTree, HuffmanTree> trees = decodeTree(dat);
+                        std::pair<FlatHuffmanTree, FlatHuffmanTree> trees = decodeTree(dat);
                         used_tree = trees.first;
                         used_dist = trees.second;
                     }
@@ -254,8 +238,8 @@ class inflate : deflate_compressor {
         //creating default huffman tree
         std::vector <Code> fixed_codes = generateFixedCodes();
         std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
-        HuffmanTree fixed_huffman(fixed_codes);
-        HuffmanTree fixed_dist_huffman(fixed_dist_codes);
+        FlatHuffmanTree fixed_huffman(fixed_codes);
+        FlatHuffmanTree fixed_dist_huffman(fixed_dist_codes);
         //starting parse of file
         std::ofstream nf;
         nf.open(new_file, std::ios::binary);

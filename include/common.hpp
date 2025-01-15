@@ -80,30 +80,29 @@ class deflate_compressor {
                 }
             }
 
-            int16_t countCodeLength (std::vector<Code>& codes, uint32_t length) {
-                uint32_t count = 0;
-                for (uint32_t i = 0; i < codes.size(); i++) {
-                    if (codes[i].len == length) {
-                        count++;
+            void construct (std::vector<Code>& codes) {
+                 // sort the codes based on len, then sort by smallest value upward
+                struct {
+                    bool operator()(Code a, Code b) const { 
+                        if (a.len < b.len) return true;
+                        if (b.len < a.len) return false;
+
+                        if (a.value < b.value) return true;
+                        if (b.value < a.value) return false;
+                        return false;
+                    }
+                } compareCode;
+                std::sort(codes.begin(), codes.end(), compareCode);
+                int16_t code = 0;
+                int16_t next_code[16] = {0};
+                int16_t bl_count[16] = {0};
+                for (size_t i = 0; i < codes.size(); i++) {
+                    int32_t len = codes[i].len;
+                    if (len > 0) {
+                        bl_count[len]++;
                     }
                 }
-                return count;
-            }
 
-            void construct (std::vector<Code>& codes) {
-                //sort the codes
-                struct {
-                    bool operator()(Code a, Code b) const { return a.len < b.len; }
-                } compareCodeL;
-                std::sort(codes.begin(), codes.end(), compareCodeL);
-
-                int16_t code = 0;
-                int16_t next_code[16];
-                int16_t bl_count[16];
-                for (uint32_t i = 0; i < 16; i++) {
-                    bl_count[i] = countCodeLength(codes, i);
-                }
-                bl_count[0] = 0;
                 for (int32_t bits = 1; bits <= 15; bits++) {
                     code = (code + bl_count[bits - 1]) << 1;
                     next_code[bits] = code;
@@ -111,13 +110,16 @@ class deflate_compressor {
 
                 for (int32_t i = 0; i < codes.size(); i++) {
                     int32_t len = codes[i].len;
-                    codes[i].code = next_code[len];
-                    next_code[len]++;
+                     if (len != 0) {
+                        codes[i].code = next_code[len];
+                        next_code[len]++;
+                    }
                 }
 
-                for (size_t i = 0; i < codes.size();) {
-                    insert(codes[0]);
-                    codes.erase(codes.begin());
+                for (size_t i = 0; i < codes.size(); i++) {
+                    if (codes[i].len > 0) {
+                        insert(codes[i]);
+                    }
                 }
             }
 
@@ -158,6 +160,16 @@ class deflate_compressor {
                 construct(codes);
             }
 
+            //copy constructor, not really, ptr is the same lol
+            FlatHuffmanTree (const FlatHuffmanTree& huff) {
+                members = huff.members;
+                head = huff.head;
+            }
+            FlatHuffmanTree (FlatHuffmanTree& huff) {
+                members = huff.members;
+                head = huff.head;
+            }
+
             Code getCodeEncoded (uint32_t code, int32_t len) {
                 Member m = findMemberCode(code, len);
                 if (m.len == -1) {
@@ -172,7 +184,19 @@ class deflate_compressor {
                 }
                 return {m.code, m.len, m.extra_bits, m.value};
             }
-            
+            std::vector<Code> decode () {
+                std::vector<Code> codes;
+                for (auto& i : members) {
+                    if (i.len > -1) {
+                        codes.push_back({i.code, i.len, i.extra_bits, i.value});
+                    }
+                }
+                struct {
+                    bool operator()(Code a, Code b) const { return a.value < b.value; }
+                } compareCodeV;
+                std::sort(codes.begin(), codes.end(), compareCodeV);
+                return codes;
+            }
     };
 
 
