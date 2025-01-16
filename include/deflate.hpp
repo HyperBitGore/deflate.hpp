@@ -2,31 +2,7 @@
 #include "common.hpp"
 #include <iostream>
 #include <utility>
-/*
-     However, we describe the compressed block format
-         in below, as a sequence of data elements of various bit
-         lengths, not a sequence of bytes.  We must therefore specify
-         how to pack these data elements into bytes to form the final
-         compressed byte sequence:
 
-             * Data elements are packed into bytes in order of
-               increasing bit number within the byte, i.e., starting
-               with the least-significant bit of the byte.
-             * Data elements other than Huffman codes are packed
-               starting with the least-significant bit of the data
-               element.
-             * Huffman codes are packed starting with the most-
-               significant bit of the code.
-
-         In other words, if one were to print out the compressed data as
-         a sequence of bytes, starting with the first byte at the
-         *right* margin and proceeding to the *left*, with the most-
-         significant bit of each byte on the left as usual, one would be
-         able to parse the result from right to left, with fixed-width
-         elements in the correct MSB-to-LSB order and Huffman codes in
-         bit-reversed order (i.e., with the first bit of the code in the
-         relative LSB position).
-*/
 // so reading huffman codes we read left to right versus regular data which is the basic right to left bit read
 // https://www.rfc-editor.org/rfc/rfc1951#page-6
 //https://minitoolz.com/tools/online-deflate-inflate-decompressor/
