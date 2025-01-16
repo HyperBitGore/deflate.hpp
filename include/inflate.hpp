@@ -1,7 +1,5 @@
 #pragma once
 #include "common.hpp"
-#include <cstddef>
-#include <iostream>
 
 /*
 In other words, if one were to print out the compressed data as
@@ -25,12 +23,99 @@ relative LSB position).
     //header, extra bits LSB-MSB
     //huffman code MSB-LSB
 
-//make sure proper inflation of data
-//  -optimize code reading, make one function in bitwrapper???
-//  -reduce cycles by reading larger blocks of bits?? min length of bits for tree???
 
 class inflate : deflate_compressor {
     private:
+
+    class Bitwrapper {
+        private:
+        size_t size = 0;
+        size_t offset = 0;
+        uint8_t bit_offset = 0;
+        uint8_t* data;
+        std::vector<uint8_t> data_clone;
+        public:
+        Bitwrapper (void* data, size_t size) {
+            this->size = size;
+            this->data = (uint8_t*)data;
+            for (size_t i = 0; i < size; i++) {
+                data_clone.push_back(this->data[i]);
+            }
+        }
+        //copy constructor
+        Bitwrapper (const Bitwrapper& wrap) {
+            size = wrap.size;
+            offset = wrap.size;
+            bit_offset = wrap.bit_offset;
+            data = wrap.data;
+            data_clone = wrap.data_clone;
+        }
+
+        uint32_t readBits (uint8_t bits) {
+            if (bits > 32) {
+                return 0;
+            }
+            uint32_t val = 0;
+            for (uint32_t i = 0; i < bits; i++) {
+                val |= (extract1Bit(data[offset], bit_offset++) << i);
+                if (bit_offset > 7) {
+                    offset++;
+                    if (offset >= size) {
+                        return val;
+                    }
+                    bit_offset = 0;
+                }
+            }
+            return val;
+        }
+
+        uint32_t readBitsMSB (uint8_t bits) {
+            if (bits > 32) {
+                return 0;
+            }
+            uint32_t val = 0;
+            for (uint32_t i = 0; i < bits; i++) {
+                uint32_t b = extract1Bit(data[offset], bit_offset++);
+                val = (val << 1) | b;
+                if (bit_offset > 7) {
+                    offset++;
+                    if (offset >= size) {
+                        return val;
+                    }
+                    bit_offset = 0;
+                }
+            }
+            return val;
+        }
+
+        uint8_t readByte () {
+            bit_offset = 0;
+            return data[offset++];
+        }
+
+        void moveByte (bool off = false) {
+            if (off) {
+                if (bit_offset != 0) {
+                    offset++;
+                    bit_offset = 0;
+                }
+                return;
+            }
+            offset++;
+            bit_offset = 0;
+        }
+
+        size_t getOffset() {
+            if (offset > 0 && bit_offset == 0) {
+                return offset - 1;
+            }
+            return offset;
+        }
+
+        size_t getSize() {
+            return size;
+        }
+    };
 
     static FlatHuffmanTree readCodeLengthTree (Bitwrapper& data, uint32_t hclen) {
          std::vector<Code> codes = {
@@ -74,7 +159,6 @@ class inflate : deflate_compressor {
             Code cc = code_len.getCodeEncoded(code, cur_bit);
             if (cc.code == code && cc.len == cur_bit && cc.len > 0) {
                 uint32_t repeat;
-                std::cout << cc.value << "\n";
                 switch (cc.value) {
                     case 16:
                         repeat = data.readBits(2);
@@ -233,7 +317,7 @@ class inflate : deflate_compressor {
         return ot;
     }
 
-        // not done
+    // not done
     static void decompress (std::string file_path, std::string new_file) {
         //creating default huffman tree
         std::vector <Code> fixed_codes = generateFixedCodes();

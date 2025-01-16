@@ -6,6 +6,6 @@ build
 gitkey
 *.compressed
 Test-export*
-hpptestinflate.bmp
-libtestdeflate.txt
+*hpptestinflate.bmp
+*libtestdeflate.txt
 libtestdeflate_tiny.txt

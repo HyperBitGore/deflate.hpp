@@ -1,9 +1,22 @@
 #include "../include/deflate.hpp"
 #include "../include/inflate.hpp"
+#include <cstddef>
 #include <fstream>
 #include <iostream>
+#include <filesystem>
 #include "../build/external/include/libdeflate.h"
 
+struct File {
+    char* data;
+    size_t size;
+    File (size_t size) {
+        data = static_cast<char*>(std::malloc(size));
+        this->size = size;
+    }
+    ~File() {
+        std::free(data);
+    }
+};
 
 void writeBufferToFile (char* data, size_t size, std::string file_path) {
     std::ofstream file;
@@ -14,48 +27,79 @@ void writeBufferToFile (char* data, size_t size, std::string file_path) {
     file.close();
 }
 
-char data[32490];
-char tiny_data[500];
-char out_data_lib[32490];
-char out_data_lib_tiny [500];
-char out_data_inhpp[32490];
-char out_data_hpp[32490];
-char out_inflate_lib[32490];
+bool sameData (File* f1, File* f2) {
+    if (f1->size != f2->size) {
+        return false;
+    }
+    for (size_t i = 0; i < f1->size; i++) {
+        if (f1->data[i] != f2->data[i]) {
+            return false;
+        }
+    }
 
-size_t readFile (std::string name, char* c, size_t size) {
+    return true;
+}
+
+size_t fileSize (std::string name) {
+    std::filesystem::path path = name;
+    return std::filesystem::file_size(path);
+}
+
+File readFile (std::string name) {
     std::ifstream f;
     f.open(name, std::ios::binary);
-    f.read(c, size);
-    size_t sizef = static_cast<size_t>(f.gcount());
+    size_t sizef = fileSize(name);
+    File file (sizef);
+    f.read(file.data, sizef);
     f.close();
-    return sizef;
+    return file;
 }
+
+bool testDecompressionFile (std::string path) {
+    File file = readFile(path);
+    std::cout << path << " is " << file.size << " bytes!\n";
+    libdeflate_compressor* compressor = libdeflate_alloc_compressor(1);
+    File out_data_lib(file.size + 100);
+    //testing the two
+    size_t size_lib = libdeflate_deflate_compress(compressor, file.data, file.size, out_data_lib.data, file.size + 100);
+    if (size_lib == 0) {
+        return false;
+    }
+    std::cout << "size of libdeflate for " << path << ": " << size_lib << "\n";
+    writeBufferToFile(out_data_lib.data, size_lib, path + "libtestdeflate.txt");
+
+    File out_data_inhpp(file.size);
+    size_t sizein_hpp = inflate::decompress(out_data_lib.data, size_lib, out_data_inhpp.data, file.size);
+    if (sizein_hpp == 0) {
+        return false;
+    }
+    std::cout << "size of inflate.hpp for " << path << ": " << sizein_hpp << "\n";
+    writeBufferToFile(out_data_inhpp.data, sizein_hpp, path + "hpptestinflate.bmp");
+    bool same = sameData(&out_data_inhpp, &file);
+    std::cout << path << " inflate.hpp is the same as original?: " << ((same) ?  "true" : "false")  << "\n"; 
+
+    File out_data_hpp(file.size);
+    size_t size_hpp = deflate::compress(file.data, file.size, out_data_hpp.data, file.size);
+    if (size_hpp == 0) {
+        return false;
+    }
+    std::cout << "size of deflate.hpp: " << size_hpp << "\n";
+    //decompressing the data
+    libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
+    File out_inflate_lib(file.size);
+    libdeflate_result result = libdeflate_deflate_decompress(decompressor, out_data_hpp.data, size_hpp, out_inflate_lib.data, file.size, NULL);
+    if (result != LIBDEFLATE_SUCCESS) {
+        return false;
+    }
+    return true;
+}
+
 
 int main () {
 
     std::cout << "Libdeflate test!\n";
-
-    size_t sizef = readFile("test.bmp", data, 32490);
-    size_t sizetiny = readFile("tiny.bmp", tiny_data, 500);
-    libdeflate_compressor* compressor = libdeflate_alloc_compressor(1);
-    //testing the two
-    size_t size_lib = libdeflate_deflate_compress(compressor, data, sizef, out_data_lib, 32490);
-    std::cout << "size of libdeflate: " << size_lib << "\n";
-    writeBufferToFile(out_data_lib, size_lib, "libtestdeflate.txt");
-    // to get fixed huffman used
-    size_t size_lib_tiny = libdeflate_deflate_compress(compressor, tiny_data, sizetiny, out_data_lib_tiny, 500);
-    writeBufferToFile(out_data_lib_tiny, size_lib_tiny, "libtestdeflate_tiny.txt");
-
-    size_t sizein_hpp = inflate::decompress(out_data_lib, size_lib, out_data_inhpp, 32490);
-    std::cout << "size of inflate.hpp: " << sizein_hpp << "\n";
-    writeBufferToFile(out_data_inhpp, sizein_hpp, "hpptestinflate.bmp");
-
-    size_t size_hpp = deflate::compress(data, sizef, out_data_hpp, 32490);
-    std::cout << "size of deflate.hpp: " << size_hpp << "\n";
-    //decompressing the data
-    libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
-    char out_inflate_lib[32490];
-    libdeflate_result result = libdeflate_deflate_decompress(decompressor, out_data_hpp, size_hpp, out_inflate_lib, 32490, NULL);
+    testDecompressionFile("test.bmp");
+    testDecompressionFile("tiny.bmp");
 
 
     return 0;
