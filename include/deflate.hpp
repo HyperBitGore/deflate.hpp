@@ -123,132 +123,111 @@ private:
     };
 
     struct Match {
-            uint16_t offset; //offset from start to match
+            uint16_t offset; //offset backwards from match
             uint16_t length; //length of match
-            uint8_t follow_code; //code after match
-            int32_t dif; // difference from match to original
+            uint16_t start;
             Match () {
                 offset = 0;
                 length = 0;
-                follow_code = 0;
-                dif = 0;
             }
-            Match (uint16_t offset, uint16_t length, uint8_t follow_code, int32_t dif) {
+            Match (uint16_t offset, uint16_t length, uint16_t start) {
                 this->offset = offset;
                 this->length = length;
-                this->follow_code = follow_code;
-                this->dif = dif;
-            }
-            //do this
-            bool overlaps (Match m) {
-                return (!(this->offset + this->length < m.offset || m.offset + m.length < this->offset)) && 
-                (this->offset + this->length <= m.offset + m.length || m.offset + m.length <= this->offset + this->length);
+                this->start = start;
             }
     };
 
+    class MatchHashMap {
+        private:
+        struct Hash {
+            uint8_t c;
+            Match m;
+            int32_t next;
+        };
+        std::vector<Hash> matches;
+        Hash top_hashes[300];
+        size_t hash (Match m) {
+            return 0;
+        }
+        public:
+
+
+
+    };
+
+    
     //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
     //https://en.wikipedia.org/wiki/LZ77_and_LZ78
     class LZ77 {
         private:
         std::vector <uint8_t> buffer;
-        std::vector <Match> prev_matches;
-        uint32_t window_index;
-        uint32_t size;
+        std::vector <Match> matches;
+        size_t window_index;
 
-        //tries to find longest match, and moves window forward by 1 byte, if no match found, just returns an empty Match
-        void findLongestMatch () {
-            std::vector<Match> matches;
-            for (int32_t i = window_index - 1; i >= 0; i--) {
+        // match with zero length is an error
+        Match findLongestMatch () {
+            size_t match_length = 3;
+            Match m;
+            for (int32_t i = window_index - 1; i < window_index; i--) {
                 if (buffer[i] == buffer[window_index]) {
-                    uint32_t length = 0;
-                    int32_t j;
-                    for (j = i; j < (int32_t)window_index && window_index + length < buffer.size() && buffer[j] == buffer[window_index + length]; j++, length++);
-                    if (length > 2) {
-                        matches.push_back(Match(i, length, (window_index + length < buffer.size()) ? buffer[window_index + length] : 0, window_index - i));
+                    size_t j = 1;
+                    size_t k = i+1;
+                    for (; k < buffer.size() && buffer[k] == buffer[window_index+j]; k++, j++);
+                    if (j >= match_length) {
+                        match_length = j;
+                        m = Match(window_index-i, j, i);
                     }
                 }
             }
-            for (size_t i = 0; i < matches.size();) {
-                bool er = false;
-                for (size_t j = 0; j < prev_matches.size() && i < matches.size(); j++) {
-                    // when a matches is erased creates issue somehow here
-                    if (prev_matches[j].overlaps(matches[i])) {
-                        if (prev_matches[j].length < matches[i].length) {
-                            prev_matches[j] = matches[i];
-                        } else {
-                            er = true;
-                            matches.erase(matches.begin() + i);
-                        }           
-                    }
-                }
-                if (!er) {
-                    i++;
-                }
-            }
-            Match longest;
-            if (matches.size() > 0) {
-                longest = matches[0];
-                for (auto& i : matches) {
-                    if (i.length > longest.length) {
-                        longest = i;
-                    }
-                }
-                prev_matches.push_back(longest);
-            } else {
-                longest.follow_code = buffer[window_index];
-            }
-            window_index += (longest.length > 0) ? longest.length : 1;
+            return m;
         }
 
-        uint32_t remainingWindow () {
-            return (uint32_t)buffer.size() - window_index;
-        }
-        void copyBuffer (std::vector<uint8_t>& buf) {
-            for (uint8_t i : buf) {
-                buffer.push_back(i);
-            }
-        }
         public:
-        
-        LZ77 (uint32_t size) {
-            this->size = size;
-            this->window_index = 0;
+
+        LZ77 (size_t size) {
+            window_index = 0;
+            buffer.reserve(size);
         }
-        //maybe just return the matches vector and the inflate function can use to compress
-        std::vector<Match> findBufferRuns (std::vector<uint8_t>& buf) {
-            copyBuffer(buf);
-            std::vector<Match> matches;
-            //loop through buffer and find the longest matches
-            //figure out why this is going out of bounds
-            while (remainingWindow() > 0) {
-                findLongestMatch();
+
+        std::vector<Match> getMatches (std::vector<uint8_t>& data) {
+            for (size_t i = 0; i < data.size(); i++) {
+                buffer.push_back(data[i]);
             }
-            //loop through buffer and edit it to compress streaks
-            for (size_t i = 0; i < buffer.size();) {
-                bool match = false;
-                size_t j = 0;
-                for (; j < prev_matches.size(); j++) {
-                    if (prev_matches[j].offset == i) {
-                        match = true;
-                        matches.push_back(prev_matches[j]);
-                        i += prev_matches[j].length;
-                        break;
-                    }
+            std::vector<Match> matches;
+            while (window_index < buffer.size()) {
+                Match m = findLongestMatch();
+                if (m.length > 0) {
+                    matches.push_back(m);
+                    window_index += m.length;
                 }
-                if (!match) {
-                    i++;
-                } else {
-                    prev_matches.erase(prev_matches.begin() + j);
-                }
+                window_index++;
             }
             return matches;
         }
+
     };
+    
+    static Bitstream makeUncompressedBlock (std::vector<uint8_t>& buffer, bool final) {
+        Bitstream bs;
+        uint8_t pre = 0b000;
+        if (final) {
+            pre |= 1;
+        }
+        bs.addBits(pre, 3);
+        bs.nextByteBoundary();
+        bs.addBits(buffer.size(), 16);
+        bs.addBits(~(buffer.size()), 16);
+        bs.addRawBuffer(buffer);
+        return bs;
+    }
+
     struct match_index_comp {
         inline bool operator() (const Match& first, const Match& second) {
-            return first.offset < second.offset;
+            return first.start < second.start;
         }
     };
+
+    //rewrite this down
     class DynamicHuffLengthCompressor {
     private:
         std::vector<Code> codes;
@@ -438,46 +417,32 @@ private:
             writeDynamicHuffmanTree(bs, matches, tree, dist_tree);
         }
         for (uint32_t i = 0; i < buffer.size(); i++) {
-            if (matches.size() > 0 && i == matches[0].offset) {
+            if (matches.size() > 0 && i == matches[0].start) {
                 // output the code for the thing
                 Range lookup = rl.lookup(matches[0].length);
 
-                Code c = tree.getCodeEncoded(lookup.code); //this is temp way to lookup 
+                Code c = tree.getCodeValue(lookup.code); //this is temp way to lookup 
                 bs.addBits(c.code, c.len);
                 // add extra bits to bitstream
                 if (c.extra_bits > 0) {
                     uint32_t extra_bits = matches[0].length % lookup.start;
                     bs.addBits(extra_bits, c.extra_bits);
                 }
-                Range dist = dl.lookup(matches[0].dif);
-                Code dic = dist_tree.getCodeEncoded(dist.code);
+                Range dist = dl.lookup(matches[0].offset);
+                Code dic = dist_tree.getCodeValue(dist.code);
                 bs.addBits(dic.code, dic.len);
                 if (dic.extra_bits > 0) {
-                    uint32_t extra_bits = matches[0].dif % dist.start;
+                    uint32_t extra_bits = matches[0].offset % dist.start;
                     bs.addBits(extra_bits, dic.extra_bits);
                 }
                 matches.erase(matches.begin());
             } else {
-                Code c = tree.getCodeEncoded((uint32_t)buffer[i]);
+                Code c = tree.getCodeValue((uint32_t)buffer[i]);
                 bs.addBits(c.code, c.len);
             }
         }
         Code endcode = tree.getCodeEncoded(256);
         bs.addBits(endcode.code, endcode.len);
-        return bs;
-    }
-
-    static Bitstream makeUncompressedBlock (std::vector<uint8_t>& buffer, bool final) {
-        Bitstream bs;
-        uint8_t pre = 0b000;
-        if (final) {
-            pre |= 1;
-        }
-        bs.addBits(pre, 3);
-        bs.nextByteBoundary();
-        bs.addBits(buffer.size(), 16);
-        bs.addBits(~(buffer.size()), 16);
-        bs.addRawBuffer(buffer);
         return bs;
     }
 
@@ -490,7 +455,7 @@ private:
         for (uint32_t i = 0; i < buffer.size(); i++) {
             if (matches.size() > 0 && i == matches[0].offset) {
                 Range lookup = rl.lookup(matches[0].length);
-                Range dist = dl.lookup(matches[0].dif);
+                Range dist = dl.lookup(matches[0].offset);
                 c_map.addOccur(lookup.code);
                 dist_codes.addOccur(dist.code);
                 matches.erase(matches.begin());
@@ -546,8 +511,8 @@ public:
         if (!of) {
             return 0;
         }
-        FlatHuffmanTree fixed_dist_huffman(generateFixedCodes());
-        FlatHuffmanTree fixed_huffman(generateFixedDistanceCodes());
+        FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
+        FlatHuffmanTree fixed_huffman(generateFixedCodes());
         uint8_t c;
         bool q = false;
         std::vector<uint8_t> buffer;
@@ -564,7 +529,7 @@ public:
                 }
                 LZ77 lz(32768);
                 // finding the matches above length of 2
-                std::vector<Match> matches = lz.findBufferRuns(buffer);
+                std::vector<Match> matches = lz.getMatches(buffer);
                 std::sort(matches.begin(), matches.end(), match_index_comp());
 
                 std::vector<uint8_t> output_buffer;
@@ -594,8 +559,8 @@ public:
     }
 
     static size_t compress (char* data, size_t data_size, char* out_data, size_t out_data_size) {
-        FlatHuffmanTree fixed_dist_huffman(generateFixedCodes());
-        FlatHuffmanTree fixed_huffman(generateFixedDistanceCodes());
+        FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
+        FlatHuffmanTree fixed_huffman(generateFixedCodes());
         uint8_t c;
         bool q = false;
         std::vector<uint8_t> buffer;
@@ -611,7 +576,7 @@ public:
             }
             LZ77 lz(32768);
             // finding the matches above length of 2
-            std::vector<Match> matches = lz.findBufferRuns(buffer);
+            std::vector<Match> matches = lz.getMatches(buffer);
             std::sort(matches.begin(), matches.end(), match_index_comp());
 
             std::vector<uint8_t> output_buffer;
@@ -623,7 +588,7 @@ public:
             if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() < bs_dynamic.getSize()) {
                 bs_out = bs_fixed;
             } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
-                bs_out = bs_fixed;
+                bs_out = bs_dynamic;
             } else {
                 bs_out = makeUncompressedBlock(buffer, q);
             }

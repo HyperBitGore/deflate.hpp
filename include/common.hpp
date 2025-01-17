@@ -11,6 +11,7 @@
 // deflate
 //  -update implementation
 //      -probably rewrite a bunch of code
+//      -rewrite buffer compression
 //  -implement deflate itself
     //-test implementation (use libdeflate or tinydeflate)
     //-need to fix compressed buffers being unreadable
@@ -160,11 +161,10 @@ class deflate_compressor {
             Member findMemberCode (uint32_t code) {
                 int index = head;
                 uint32_t bit = 0;
-                while (index != -1) {
-                    if (members[index].code == code && members[index].len > -1) {
-                        return members[index];
-                    }
+                uint32_t concat = 0;
+                while (index != -1 && concat != code) {
                     uint32_t direction = extract1Bit(code, bit);
+                    concat |= (direction << bit);
                     // left
                     if (!direction) {
                         index = members[index].left;
