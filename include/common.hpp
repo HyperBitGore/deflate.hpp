@@ -10,12 +10,10 @@
 
 // deflate
 //  -update implementation
-//      -probably rewrite a bunch of code
-//      -rewrite buffer compression
-//  -implement deflate itself
-    //-test implementation (use libdeflate or tinydeflate)
-    //-need to fix compressed buffers being unreadable
-    //-maybe order of bits is wrong?
+//      -improve the matches
+//      -make sure bitstream writing in correct order for huffman codes
+//      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
+//      -rewrite buffer compression, maybe need to write bits in different order
 //  -add error checking and maybe test files lol
 //  -optimize
 

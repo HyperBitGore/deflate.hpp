@@ -138,12 +138,11 @@ class inflate : deflate_compressor {
                 {0, 0, 0, 14},
                 {0, 0, 0, 1},
                 {0, 0, 0, 15},
-            };
+        };
         for (uint32_t i = 0; i < hclen + 4; i++) {
                 uint32_t val = data.readBits(3);
                 codes[i].len = val;
         }
-        std::vector<Code> sorted_codes;
        
         return FlatHuffmanTree(codes);
     }

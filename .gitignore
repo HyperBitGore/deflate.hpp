@@ -8,4 +8,5 @@ gitkey
 Test-export*
 *hpptestinflate.bmp
 *libtestdeflate.txt
+*hpptestdeflate.txt
 libtestdeflate_tiny.txt

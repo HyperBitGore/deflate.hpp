@@ -83,6 +83,7 @@ bool testDecompressionFile (std::string path) {
     if (size_hpp == 0) {
         return false;
     }
+    writeBufferToFile(out_data_hpp.data, size_hpp, path + "hpptestdeflate.txt");
     std::cout << "size of deflate.hpp for " << path << " : " << size_hpp << "\n";
     //decompressing the data
     libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
@@ -93,6 +94,7 @@ bool testDecompressionFile (std::string path) {
     if (result != LIBDEFLATE_SUCCESS) {
         return false;
     }
+    writeBufferToFile(out_inflate_lib.data, out_lib_deflate, path + "libtestinflate.bmp");
     return true;
 }
 
