@@ -4,6 +4,7 @@
 #include <fstream>
 #include <iostream>
 #include <filesystem>
+#include <vector>
 #include "../build/external/include/libdeflate.h"
 
 struct File {
@@ -78,18 +79,17 @@ bool testDecompressionFile (std::string path) {
     bool same = sameData(&out_data_inhpp, &file);
     std::cout << path << " inflate.hpp is the same as original?: " << ((same) ?  "true" : "false")  << "\n"; 
 
-    File out_data_hpp(file.size);
-    size_t size_hpp = deflate::compress(file.data, file.size, out_data_hpp.data, file.size);
-    if (size_hpp == 0) {
+    std::vector<uint8_t> out_data_hpp = deflate::compress(file.data, file.size);
+    if (out_data_hpp.size() == 0) {
         return false;
     }
-    writeBufferToFile(out_data_hpp.data, size_hpp, path + "hpptestdeflate.txt");
-    std::cout << "size of deflate.hpp for " << path << " : " << size_hpp << "\n";
+    writeBufferToFile(reinterpret_cast<char*>(out_data_hpp.data()), out_data_hpp.size(), path + "hpptestdeflate.txt");
+    std::cout << "size of deflate.hpp for " << path << " : " << out_data_hpp.size() << "\n";
     //decompressing the data
     libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
-    File out_inflate_lib(file.size);
+    File out_inflate_lib(out_data_hpp.size());
     size_t out_lib_deflate = 0;
-    libdeflate_result result = libdeflate_deflate_decompress(decompressor, out_data_hpp.data, size_hpp, out_inflate_lib.data, file.size, &out_lib_deflate);
+    libdeflate_result result = libdeflate_deflate_decompress(decompressor, out_data_hpp.data(), out_data_hpp.size(), out_inflate_lib.data, file.size, &out_lib_deflate);
     std::cout << "size of libdeflate inflate for " << path << " : " << out_lib_deflate << "\n"; 
     if (result != LIBDEFLATE_SUCCESS) {
         return false;
@@ -104,6 +104,7 @@ int main () {
     std::cout << "Libdeflate test!\n";
     testDecompressionFile("test.bmp");
     testDecompressionFile("tiny.bmp");
+    //testDecompressionFile("tmp.7z");
 
 
     return 0;

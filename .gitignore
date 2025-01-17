@@ -10,3 +10,5 @@ Test-export*
 *libtestdeflate.txt
 *hpptestdeflate.txt
 libtestdeflate_tiny.txt
+*libtestinflate.bmp
+tmp.7z

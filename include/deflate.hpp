@@ -1,5 +1,6 @@
 #pragma once
 #include "common.hpp"
+#include <cstdint>
 #include <iostream>
 #include <utility>
 
@@ -14,7 +15,13 @@
 class deflate : deflate_compressor {
 private:
 
-
+     static uint32_t flipBits (uint32_t value, uint8_t max_bit) {
+        uint32_t v = 0;
+        for (uint32_t i = 0, j = max_bit; i <= max_bit; i++, j--) {
+            v |= extract1Bit(value, i) << (j - 1);
+        }
+        return v;
+    }
     // https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
     // https://pzs.dstu.dp.ua/ComputerGraphics/ic/bibl/huffman.pdf
     class CodeMap {
@@ -63,12 +70,12 @@ private:
             std::vector <Code> out_codes;
             for (t_code i : temp_codes) {
                 // check if len needs to be increased for this one, so if the amount has surpassed the allowed number of codes of the bits
-                uint32_t allowed = static_cast<uint32_t>(std::pow(2, len));
-                if (code + 1 > allowed) {
-                    len++;
-                }
+                uint32_t allowed = static_cast<uint32_t>(std::pow(2, len) - 1);
                 out_codes.push_back({(uint16_t)code, len, 0, (uint16_t)i.value});
                 code++;
+                if (code > allowed) {
+                    len++;
+                }
             }
             return out_codes;
         }
@@ -108,8 +115,11 @@ private:
                         bit_offset = 0;
                     }
                     uint8_t bit = extract1Bit(val, i);
-                    data[offset] = (data[offset] << 1) | bit;
+                    data[offset] |= (bit << (7 - bit_offset));
                 }
+            }
+            uint8_t curBit () {
+                return bit_offset;
             }
             void nextByteBoundary () {
                 
@@ -140,6 +150,7 @@ private:
             Match () {
                 offset = 0;
                 length = 0;
+                start = 0;
             }
             Match (uint16_t offset, uint16_t length, uint16_t start) {
                 this->offset = offset;
@@ -153,8 +164,32 @@ private:
     //https://en.wikipedia.org/wiki/LZ77_and_LZ78
     class LZ77 {
         private:
+        class MatchHashmap {
+            private: 
+            std::vector<Match> matches;
+            public:
+            MatchHashmap () {
+            }
+            MatchHashmap (size_t size) {
+                matches.reserve(size);
+                for (size_t i = 0; i < size; i++) {
+                    matches.push_back(Match());
+                }
+            }
+
+            bool addMatch (Match m) {
+                size_t index = m.start;
+                if (matches[index].length < m.length) {
+                    matches[index] = m;
+                    return true;
+                }
+                return false;
+            }
+        };
+
         std::vector <uint8_t> buffer;
         std::vector <Match> matches;
+        MatchHashmap mhash;
         size_t window_index;
 
         // match with zero length is an error
@@ -168,7 +203,7 @@ private:
                     for (; k < buffer.size() && buffer[k] == buffer[window_index+j]; k++, j++);
                     if (j >= match_length) {
                         match_length = j;
-                        m = Match(window_index-i, j, i);
+                        m = Match(window_index-i, j, window_index);
                     }
                 }
             }
@@ -179,6 +214,7 @@ private:
 
         LZ77 (size_t size) {
             window_index = 0;
+            mhash = MatchHashmap(size);
             buffer.reserve(size);
         }
 
@@ -189,7 +225,7 @@ private:
             std::vector<Match> matches;
             while (window_index < buffer.size()) {
                 Match m = findLongestMatch();
-                if (m.length > 0) {
+                if (m.length > 0 && mhash.addMatch(m)) {
                     matches.push_back(m);
                     window_index += m.length;
                 }
@@ -293,20 +329,6 @@ private:
                 }
             }
         }
-        void writeCodeLengthTree (Bitstream& bs) {
-            uint32_t max = 4;
-            for (uint32_t i = 4; i < codes.size(); i++) {
-                if (codes[i].len > 0) {
-                    max = i;
-                }
-            }
-            max = max - 4;
-            // HCLEN
-            bs.addBits(max, 4);
-            for (uint32_t i = 0; i < max + 4; i++) {
-                bs.addBits(codes[i].len, 3);
-            }
-        }
 
     public:
         DynamicHuffLengthCompressor() {
@@ -347,7 +369,18 @@ private:
             FlatHuffmanTree code_tree = constructTree(bytes);
             std::vector<Code> code_tree_codes = code_tree.decode();
             // write the code length tree
-            writeCodeLengthTree(bs);
+            uint32_t max = 0;
+            for (int32_t i = codes.size() - 1; i >= 0; i--) {
+                if (codes[i].len > 0) {
+                    max = i;
+                    break;
+                }
+            }
+            // HCLEN
+            bs.addBits(max-3, 4);       
+            for (uint32_t i = 0; i < max; i++) {
+                bs.addBits(codes[i].len, 3);
+            }
             // compressing the table
             // for each byte we loop forward and see how many times it's repeated
             // depending on many times repeated we determine the proper code to use for that length of bytes
@@ -372,7 +405,7 @@ private:
                     code = bytes[i];
                 }
                 Code c = code_tree.getCodeValue(code);
-                bs.addBits(c.code, c.len);
+                bs.addBits(flipBits(c.code, c.len), c.len);
                 if (c.extra_bits > 0) {
                     uint32_t start = 3;
                     if (c.value == 18) {
@@ -461,34 +494,35 @@ private:
         bs.addBits(pre, 3);
         if ((preamble & 0b100) == 4) {
             writeDynamicHuffmanTree(bs, matches, tree, dist_tree, rl, dl);
+            return bs;
         }
         for (uint32_t i = 0; i < buffer.size(); i++) {
             if (matches.size() > 0 && i == matches[0].start) {
                 // output the code for the thing
                 Range lookup = rl.lookup(matches[0].length);
 
-                Code c = tree.getCodeValue(lookup.code); //this is temp way to lookup 
-                bs.addBits(c.code, c.len);
+                Code c = tree.getCodeValue(lookup.code);
+                bs.addBits(flipBits(c.code, c.len), c.len);
                 // add extra bits to bitstream
                 if (c.extra_bits > 0) {
                     uint32_t extra_bits = matches[0].length % lookup.start;
-                    bs.addBits(extra_bits, c.extra_bits);
+                    bs.addBits(flipBits(extra_bits, c.extra_bits), c.extra_bits);
                 }
                 Range dist = dl.lookup(matches[0].offset);
                 Code dic = dist_tree.getCodeValue(dist.code);
-                bs.addBits(dic.code, dic.len);
+                bs.addBits(flipBits(dic.code, dic.len), dic.len);
                 if (dic.extra_bits > 0) {
                     uint32_t extra_bits = matches[0].offset % dist.start;
-                    bs.addBits(extra_bits, dic.extra_bits);
+                    bs.addBits(flipBits(extra_bits, dic.extra_bits), dic.extra_bits);
                 }
                 matches.erase(matches.begin());
             } else {
                 Code c = tree.getCodeValue((uint32_t)buffer[i]);
-                bs.addBits(c.code, c.len);
+                bs.addBits(flipBits(c.code, c.len), c.len);
             }
         }
-        Code endcode = tree.getCodeEncoded(256);
-        bs.addBits(endcode.code, endcode.len);
+        Code endcode = tree.getCodeValue(256);
+        bs.addBits(flipBits(endcode.code, endcode.len), endcode.len);
         return bs;
     }
 public:
@@ -552,7 +586,7 @@ public:
         return out_index;
     }
 
-    static size_t compress (char* data, size_t data_size, char* out_data, size_t out_data_size) {
+    static std::vector<uint8_t> compress (char* data, size_t data_size) {
         FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
         FlatHuffmanTree fixed_huffman(generateFixedCodes());
         uint8_t c;
@@ -560,6 +594,7 @@ public:
         std::vector<uint8_t> buffer;
         size_t index = 0;
         size_t out_index = 0;
+        std::vector<uint8_t> out_data;
          while (!q) {
             for (; index < data_size && buffer.size() < 32768; index++) {
                 buffer.push_back(data[index]);
@@ -582,20 +617,18 @@ public:
             if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() < bs_dynamic.getSize()) {
                 bs_out = bs_fixed;
             } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
-                bs_out = bs_dynamic;
+                bs_out = bs_fixed;
             } else {
                 bs_out = makeUncompressedBlock(buffer, q);
             }
-            // Bitstream bs_store = makeUncompressedBlock(buffer, q);
-            // output_buffer = bs_store.getData();
             // compare size of bs
             output_buffer = bs_out.getData();
             for (int32_t i = 0; i < bs_out.getSize(); i++) {
-                out_data[out_index] = output_buffer[i];
+                out_data.push_back(output_buffer[i]);
                 out_index++;
             }
             buffer.clear();
         }
-        return out_index;
+        return out_data;
     }
 };

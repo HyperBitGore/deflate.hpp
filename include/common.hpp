@@ -10,10 +10,8 @@
 
 // deflate
 //  -update implementation
-//      -improve the matches
-//      -make sure bitstream writing in correct order for huffman codes
+//      -improve the matches, hash start and check if the one in position longer than other
 //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
-//      -rewrite buffer compression, maybe need to write bits in different order
 //  -add error checking and maybe test files lol
 //  -optimize
 
@@ -105,9 +103,9 @@ class deflate_compressor {
                     }
                 } compareCode;
                 std::sort(codes.begin(), codes.end(), compareCode);
-                int16_t code = 0;
-                int16_t next_code[16] = {0};
-                int16_t bl_count[16] = {0};
+                int32_t code = 0;
+                int32_t next_code[16] = {0};
+                int32_t bl_count[16] = {0};
                 for (size_t i = 0; i < codes.size(); i++) {
                     int32_t len = codes[i].len;
                     if (len > 0) {
