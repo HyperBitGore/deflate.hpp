@@ -22,9 +22,7 @@ struct File {
 void writeBufferToFile (char* data, size_t size, std::string file_path) {
     std::ofstream file;
     file.open(file_path, std::ios::binary);
-    for (size_t i = 0; i < size; i++) {
-        file << data[i];
-    }
+    file.write(data, size);
     file.close();
 }
 
@@ -43,7 +41,7 @@ bool sameData (File* f1, File* f2) {
 
 size_t fileSize (std::string name) {
     std::filesystem::path path = name;
-    return std::filesystem::file_size(path);
+    return static_cast<size_t>(std::filesystem::file_size(path));
 }
 
 File readFile (std::string name) {

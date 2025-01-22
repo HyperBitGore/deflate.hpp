@@ -196,14 +196,14 @@ private:
         Match findLongestMatch () {
             size_t match_length = 3;
             Match m;
-            for (int32_t i = window_index - 1; i < window_index; i--) {
+            for (int32_t i = window_index - 1; i < (int32_t)window_index; i--) {
                 if (buffer[i] == buffer[window_index]) {
                     size_t j = 1;
                     size_t k = i+1;
-                    for (; k < buffer.size() && buffer[k] == buffer[window_index+j]; k++, j++);
+                    for (; k < buffer.size() && window_index+j < buffer.size() && buffer[k] == buffer[window_index+j]; k++, j++);
                     if (j >= match_length) {
                         match_length = j;
-                        m = Match(window_index-i, j, window_index);
+                        m = Match((uint16_t)window_index-i, (uint16_t)j, (uint16_t)window_index);
                     }
                 }
             }
@@ -228,8 +228,9 @@ private:
                 if (m.length > 0 && mhash.addMatch(m)) {
                     matches.push_back(m);
                     window_index += m.length;
+                } else {
+                    window_index++;
                 }
-                window_index++;
             }
             return matches;
         }
@@ -496,7 +497,7 @@ private:
             writeDynamicHuffmanTree(bs, matches, tree, dist_tree, rl, dl);
             return bs;
         }
-        for (uint32_t i = 0; i < buffer.size(); i++) {
+        for (uint32_t i = 0; i < buffer.size();) {
             if (matches.size() > 0 && i == matches[0].start) {
                 // output the code for the thing
                 Range lookup = rl.lookup(matches[0].length);
@@ -515,10 +516,12 @@ private:
                     uint32_t extra_bits = matches[0].offset % dist.start;
                     bs.addBits(flipBits(extra_bits, dic.extra_bits), dic.extra_bits);
                 }
+                i += matches[0].length;
                 matches.erase(matches.begin());
             } else {
                 Code c = tree.getCodeValue((uint32_t)buffer[i]);
                 bs.addBits(flipBits(c.code, c.len), c.len);
+                i++;
             }
         }
         Code endcode = tree.getCodeValue(256);
@@ -589,7 +592,6 @@ public:
     static std::vector<uint8_t> compress (char* data, size_t data_size) {
         FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
         FlatHuffmanTree fixed_huffman(generateFixedCodes());
-        uint8_t c;
         bool q = false;
         std::vector<uint8_t> buffer;
         size_t index = 0;
@@ -623,7 +625,7 @@ public:
             }
             // compare size of bs
             output_buffer = bs_out.getData();
-            for (int32_t i = 0; i < bs_out.getSize(); i++) {
+            for (int32_t i = 0; i < (int32_t)bs_out.getSize(); i++) {
                 out_data.push_back(output_buffer[i]);
                 out_index++;
             }
