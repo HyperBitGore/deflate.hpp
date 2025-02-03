@@ -196,7 +196,7 @@ private:
         Match findLongestMatch () {
             size_t match_length = 3;
             Match m;
-            for (int32_t i = window_index - 1; i < (int32_t)window_index; i--) {
+            for (int32_t i = window_index - 1; i < (int32_t)window_index && i > 0; i--) {
                 if (buffer[i] == buffer[window_index]) {
                     size_t j = 1;
                     size_t k = i+1;
@@ -507,14 +507,14 @@ private:
                 // add extra bits to bitstream
                 if (c.extra_bits > 0) {
                     uint32_t extra_bits = matches[0].length % lookup.start;
-                    bs.addBits(flipBits(extra_bits, c.extra_bits), c.extra_bits);
+                    bs.addBits(extra_bits, c.extra_bits);
                 }
                 Range dist = dl.lookup(matches[0].offset);
                 Code dic = dist_tree.getCodeValue(dist.code);
                 bs.addBits(flipBits(dic.code, dic.len), dic.len);
                 if (dic.extra_bits > 0) {
                     uint32_t extra_bits = matches[0].offset % dist.start;
-                    bs.addBits(flipBits(extra_bits, dic.extra_bits), dic.extra_bits);
+                    bs.addBits(extra_bits, dic.extra_bits);
                 }
                 i += matches[0].length;
                 matches.erase(matches.begin());

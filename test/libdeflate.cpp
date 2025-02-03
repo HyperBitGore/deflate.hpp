@@ -85,7 +85,7 @@ bool testDecompressionFile (std::string path) {
     std::cout << "size of deflate.hpp for " << path << " : " << out_data_hpp.size() << "\n";
     //decompressing the data
     libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
-    File out_inflate_lib(out_data_hpp.size());
+    File out_inflate_lib(file.size);
     size_t out_lib_deflate = 0;
     libdeflate_result result = libdeflate_deflate_decompress(decompressor, out_data_hpp.data(), out_data_hpp.size(), out_inflate_lib.data, file.size, &out_lib_deflate);
     std::cout << "size of libdeflate inflate for " << path << " : " << out_lib_deflate << "\n"; 
