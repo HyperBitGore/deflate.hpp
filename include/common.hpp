@@ -10,8 +10,8 @@
 
 // deflate
 //  -update implementation
-//      -improve the matches, hash start and check if the one in position longer than other
-//      -issue is with something with matches, creating unreadable data
+//      -fix dynamic huffman trees/blocks
+//          -code lengths were broken because there were too many codes per length
 //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
 //  -add error checking and maybe test files lol
 //  -optimize

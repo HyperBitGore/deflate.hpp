@@ -65,17 +65,18 @@ private:
                 }
             };
             std::sort(temp_codes.begin(), temp_codes.end(), compare_tcode());
-            int32_t len = 2;
-            uint32_t code = 0;
+            int32_t len = 3;
+            uint16_t code = 0;
             std::vector <Code> out_codes;
             for (t_code i : temp_codes) {
                 // check if len needs to be increased for this one, so if the amount has surpassed the allowed number of codes of the bits
                 uint32_t allowed = static_cast<uint32_t>(std::pow(2, len) - 1);
+                if (code+1 >= allowed) {
+                    len++;
+                    allowed = static_cast<uint32_t>(std::pow(2, len) - 1);
+                }
                 out_codes.push_back({(uint16_t)code, len, 0, (uint16_t)i.value});
                 code++;
-                if (code > allowed) {
-                    len++;
-                }
             }
             return out_codes;
         }
@@ -127,6 +128,12 @@ private:
                 bit_offset = 0;
                 offset++;
             }
+            void nextByteBoundaryConditional () {
+                if (bit_offset != 0) {
+                    nextByteBoundary();
+                }
+            }
+
             std::vector<uint8_t> getData () {
                 return data;
             }
@@ -257,171 +264,6 @@ private:
         }
     };
 
-    //rewrite this down
-    class DynamicHuffLengthCompressor {
-    private:
-        struct compare_code_value {
-                inline bool operator() (const Code& code1, const Code& code2) {
-                    return code1.value < code2.value;
-                }
-        };
-        std::vector<Code> codes;
-
-        uint32_t countRepeats (std::vector<uint8_t>& bytes, uint32_t index) {
-            uint32_t count = 0;
-            for (uint32_t i = index + 1; i < bytes.size(); i++) {
-                if (bytes[i] == bytes[index]) {
-                    count++;
-                } else {
-                    return count;
-                }
-            }
-            return count;
-        }
-        FlatHuffmanTree constructTree (std::vector<uint8_t>& bytes) {
-            CodeMap cm;
-            for (uint32_t i = 0; i < bytes.size();) {
-                uint32_t reps = countRepeats(bytes, i);
-                if (reps > 2) {
-                    if (bytes[i] == 0) {
-                        if (reps <= 10) {
-                            cm.addOccur(17);
-                            i += reps;
-                        } else {
-                            cm.addOccur(18);
-                            i += (reps <= 138) ? reps : 138;
-                        }
-                    } else {
-                        cm.addOccur(16);
-                        i += (reps <= 6) ? reps : 6;
-                    }
-                } else {
-                    cm.addOccur(bytes[i]);
-                    i++;
-                }
-            }
-            std::vector<Code> t_codes = cm.generateCodes();
-            for (auto& i : codes) {
-                for (auto& j : t_codes) {
-                    if (i.value == j.value) {
-                        i.code = j.code;
-                        i.len = j.len;
-                        j.extra_bits = i.extra_bits;
-                    }
-                }
-            }
-            return FlatHuffmanTree(t_codes);
-        }
-
-        void writeCodes (std::vector<Code>& t_codes, std::vector<uint8_t>& bytes, size_t max) {
-            std::sort(t_codes.begin(), t_codes.end(), compare_code_value());
-            for (uint32_t i = 0; i < max; i++) {
-                bool write = false;
-                for (auto& j : t_codes) {
-                    // have to check contains the value
-                    if (((uint32_t)j.value) == i) {
-                        bytes.push_back(j.len);
-                        write = true;
-                        break;
-                    }
-                } 
-                if (!write) {
-                    bytes.push_back(0);
-                }
-            }
-        }
-
-    public:
-        DynamicHuffLengthCompressor() {
-            codes = {
-                {0, 0, 2, 16},
-                {0, 0, 3, 17},
-                {0, 0, 7, 18},
-                {0, 0, 0, 0},
-                {0, 0, 0, 8},
-                {0, 0, 0, 7},
-                {0, 0, 0, 9},
-                {0, 0, 0, 6},
-                {0, 0, 0, 10},
-                {0, 0, 0, 5},
-                {0, 0, 0, 11},
-                {0, 0, 0, 4},
-                {0, 0, 0, 12},
-                {0, 0, 0, 3},
-                {0, 0, 0, 13},
-                {0, 0, 0, 2},
-                {0, 0, 0, 14},
-                {0, 0, 0, 1},
-                {0, 0, 0, 15},
-            };
-        }
-
-        Bitstream compress (Bitstream& bs, uint32_t len_max, uint32_t dist_max, FlatHuffmanTree huff, FlatHuffmanTree dist) {
-            std::vector<uint8_t> bytes;
-            std::vector<Code> huff_codes = huff.decode();
-            // constructing raw bytes of the table
-            writeCodes(huff_codes, bytes, 257 + len_max);
-            std::vector<Code> dist_codes = dist.decode();
-            writeCodes(dist_codes, bytes, 1 + dist_max);
-
-            // constructing the code length huffman tree
-            // 3 bits for each code length
-            // start by computing how often each code length character will be used
-            FlatHuffmanTree code_tree = constructTree(bytes);
-            std::vector<Code> code_tree_codes = code_tree.decode();
-            // write the code length tree
-            uint32_t max = 0;
-            for (int32_t i = codes.size() - 1; i >= 0; i--) {
-                if (codes[i].len > 0) {
-                    max = i;
-                    break;
-                }
-            }
-            // HCLEN
-            bs.addBits(max-3, 4);       
-            for (uint32_t i = 0; i < max; i++) {
-                bs.addBits(codes[i].len, 3);
-            }
-            // compressing the table
-            // for each byte we loop forward and see how many times it's repeated
-            // depending on many times repeated we determine the proper code to use for that length of bytes
-            for (uint32_t i = 0; i < bytes.size();) {
-                uint32_t reps = countRepeats(bytes, i);
-                uint32_t code = 0;
-                uint32_t inc = 1;
-                if (reps > 2) {
-                    if (bytes[i] == 0) {
-                        if (reps <= 10) {
-                            code = 17;
-                            inc = (reps < 10) ? reps : 10;
-                        } else {
-                            code = 18;
-                            inc = (reps < 138) ? reps : 138; 
-                        }
-                    } else {
-                        code = 16;
-                        inc = (reps <= 6) ? reps : 6;
-                    }
-                } else {
-                    code = bytes[i];
-                }
-                Code c = code_tree.getCodeValue(code);
-                bs.addBits(flipBits(c.code, c.len), c.len);
-                if (c.extra_bits > 0) {
-                    uint32_t start = 3;
-                    if (c.value == 18) {
-                        start = 11;
-                    }
-                    uint32_t val = reps - start;
-                    bs.addBits(val, c.extra_bits);
-                }
-                i += inc;
-            }
-
-            return bs;
-        }
-    };
-
     static std::pair<FlatHuffmanTree, FlatHuffmanTree> constructDynamicHuffmanTree (std::vector<uint8_t>& buffer, std::vector<Match> matches) {
         CodeMap c_map;
         c_map.addOccur(256);
@@ -448,7 +290,121 @@ private:
         FlatHuffmanTree dist_tree(dist_codes.generateCodes());
         return std::pair<FlatHuffmanTree, FlatHuffmanTree> (tree, dist_tree);
     }
-
+    struct compare_code_value {
+        inline bool operator() (const Code& code1, const Code& code2) {
+            return code1.value < code2.value;
+        }
+    };
+    static uint32_t countRepeats (std::vector<uint8_t>& bytes, uint32_t index) {
+        uint32_t count = 0;
+        for (uint32_t i = index + 1; i < bytes.size(); i++) {
+            if (bytes[i] == bytes[index]) {
+                count++;
+            } else {
+                return count;
+            }
+        }
+        return count;
+    }
+    static FlatHuffmanTree constructDynamicHuffmanCodeLengthTree (std::vector<uint8_t>& bytes, std::vector<Code>& codes) {
+        CodeMap cm;
+        for (uint32_t i = 0; i < bytes.size();) {
+            uint32_t reps = countRepeats(bytes, i);
+            if (reps > 2) {
+                if (bytes[i] == 0) {
+                    if (reps <= 10) {
+                        cm.addOccur(17);
+                        i += reps;
+                    } else {
+                        cm.addOccur(18);
+                        i += (reps <= 138) ? reps : 138;
+                    }
+                } else {
+                    cm.addOccur(16);
+                    i += (reps <= 6) ? reps : 6;
+                }
+            } else {
+                cm.addOccur(bytes[i]);
+                i++;
+            }
+        }
+        std::vector<Code> t_codes = cm.generateCodes();
+        std::vector <Code> test_codes;
+        test_codes.push_back({16, 7, 0, 16});
+        test_codes.push_back({17, 3, 0, 17});
+        test_codes.push_back({18, 6, 0, 18});
+        test_codes.push_back({0, 3, 0, 0});
+        test_codes.push_back({8, 4, 0, 8});
+        test_codes.push_back({7, 4, 0, 7});
+        test_codes.push_back({9, 3, 0, 9});
+        test_codes.push_back({6, 3, 0, 6});
+        test_codes.push_back({10, 3, 0, 10});
+        test_codes.push_back({5, 4, 0, 5});
+        test_codes.push_back({11, 3, 0, 11});
+        test_codes.push_back({4, 5, 0, 4});
+        test_codes.push_back({2, 7, 0, 2});
+        for (auto& i : codes) {
+            for (auto& j : t_codes) {
+                if (i.value == j.value) {
+                    i.code = j.code;
+                    i.len = j.len;
+                    j.extra_bits = i.extra_bits;
+                }
+            }
+        }
+        return FlatHuffmanTree(t_codes);
+    }
+    static void writeDynamicHuffmanBytes (std::vector<Code> t_codes, std::vector<uint8_t>& bytes, size_t max) {
+        std::sort(t_codes.begin(), t_codes.end(), compare_code_value());
+        for (uint32_t i = 0; i < max; i++) {
+            bool write = false;
+            for (auto& j : t_codes) {
+                // have to check contains the value
+                if (((uint32_t)j.value) == i) {
+                    bytes.push_back(j.len);
+                    write = true;
+                    break;
+                }
+            } 
+            if (!write) {
+                bytes.push_back(0);
+            }
+        }
+    }
+    static void compressDynamicHuffmanTreeCodes (std::vector<uint8_t>& bytes, Bitstream& bs, FlatHuffmanTree& code_tree) {
+        for (uint32_t i = 0; i < bytes.size();) {
+            uint32_t reps = countRepeats(bytes, i);
+            uint32_t code = 0;
+            uint32_t inc = 1;
+            if (reps > 2) {
+                if (bytes[i] == 0) {
+                    if (reps <= 10) {
+                        code = 17;
+                        inc = (reps < 10) ? reps : 10;
+                    } else {
+                        code = 18;
+                        inc = (reps < 138) ? reps : 138; 
+                    }
+                } else {
+                    code = 16;
+                    inc = (reps < 6) ? reps : 6;
+                }
+            } else {
+            code = bytes[i];
+            }
+            Code c = code_tree.getCodeValue(code);
+            bs.addBits(c.code, c.len);
+            if (c.extra_bits > 0) {
+                uint32_t start = 3;
+                if (c.value == 18) {
+                    start = 11;
+                }
+                uint32_t val = reps - start;
+                bs.addBits(val, c.extra_bits);
+            }
+            i += inc;
+        }
+    }
     static void writeDynamicHuffmanTree (Bitstream& bs, std::vector<Match>& matches, FlatHuffmanTree tree, FlatHuffmanTree dist_tree, RangeLookup rl, RangeLookup dl) {
         // calculating how much above 257 to go for matches
         uint32_t matches_size = 0;
@@ -479,8 +435,63 @@ private:
         // HDIST
         bs.addBits(dist_codes_size, 5);
         // compress the code lengths and use that to generate the HCLEN
-        DynamicHuffLengthCompressor compressor;
-        compressor.compress(bs, matches_size, dist_codes_size, tree, dist_tree);
+        std::vector<Code> codes = {
+                {0, 0, 2, 16},
+                {0, 0, 3, 17},
+                {0, 0, 7, 18},
+                {0, 0, 0, 0},
+                {0, 0, 0, 8},
+                {0, 0, 0, 7},
+                {0, 0, 0, 9},
+                {0, 0, 0, 6},
+                {0, 0, 0, 10},
+                {0, 0, 0, 5},
+                {0, 0, 0, 11},
+                {0, 0, 0, 4},
+                {0, 0, 0, 12},
+                {0, 0, 0, 3},
+                {0, 0, 0, 13},
+                {0, 0, 0, 2},
+                {0, 0, 0, 14},
+                {0, 0, 0, 1},
+                {0, 0, 0, 15},
+        };
+        std::vector<uint8_t> bytes;
+        std::vector<uint8_t> huff_bytes;
+        std::vector<Code> huff_codes = tree.decode();
+        // constructing raw bytes of the table
+        writeDynamicHuffmanBytes(huff_codes, huff_bytes, 257 + matches_size);
+        std::vector<uint8_t> dist_bytes;
+        writeDynamicHuffmanBytes(dist_codes, dist_bytes, 1 + dist_codes_size);
+        for (auto& i : huff_bytes) {
+            bytes.push_back(i);
+        }
+        for (auto& i : dist_bytes) {
+            bytes.push_back(i);
+        }
+        // constructing the code length huffman tree
+        // 3 bits for each code length
+        // start by computing how often each code length character will be used
+        FlatHuffmanTree code_tree = constructDynamicHuffmanCodeLengthTree(bytes, codes);
+        // write the code length tree
+        uint32_t max = 0;
+        for (int32_t i = codes.size() - 1; i >= 0; i--) {
+            if (codes[i].len > 0) {
+                max = i;
+                break;
+            }
+        }
+        // HCLEN
+        bs.addBits(max - 3, 4);       
+        for (uint32_t i = 0; i <= max; i++) {
+            bs.addBits(codes[i].len, 3);
+        }
+        // bs.nextByteBoundaryConditional();
+        // compressed separate, not treated as one run of bits
+        // main huffman tree
+        compressDynamicHuffmanTreeCodes(huff_bytes, bs, code_tree) ;
+        //  dist tree
+        compressDynamicHuffmanTreeCodes(dist_bytes, bs, code_tree);
     }
 
     // deflate
@@ -495,7 +506,6 @@ private:
         bs.addBits(pre, 3);
         if ((preamble & 0b100) == 4) {
             writeDynamicHuffmanTree(bs, matches, tree, dist_tree, rl, dl);
-            return bs;
         }
         for (uint32_t i = 0; i < buffer.size();) {
             if (matches.size() > 0 && i == matches[0].start) {
@@ -619,7 +629,7 @@ public:
             if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() < bs_dynamic.getSize()) {
                 bs_out = bs_fixed;
             } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
-                bs_out = bs_fixed;
+                bs_out = bs_dynamic;
             } else {
                 bs_out = makeUncompressedBlock(buffer, q);
             }
