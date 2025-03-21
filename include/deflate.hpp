@@ -3,6 +3,10 @@
 #include <cstdint>
 #include <iostream>
 #include <utility>
+#define MAX_LITLEN_CODE_LEN 15
+#define MAX_DIST_CODE_LEN 15
+#define MAX_PRE_CODE_LEN 7
+#define KB32 32768
 
 // so reading huffman codes we read left to right versus regular data which is the basic right to left bit read
 // https://www.rfc-editor.org/rfc/rfc1951#page-6
@@ -45,7 +49,7 @@ private:
             }
             return 0;
         }
-        std::vector<Code> generateCodes () {   
+        std::vector<Code> generateCodes (uint32_t max_length, uint32_t len_start) {   
             struct t_code {
                 uint32_t occurs;
                 uint32_t value;
@@ -65,18 +69,18 @@ private:
                 }
             };
             std::sort(temp_codes.begin(), temp_codes.end(), compare_tcode());
-            int32_t len = 3;
-            uint16_t code = 0;
+            int32_t len = len_start;
+            uint16_t code = (1 << (len - 1));
             std::vector <Code> out_codes;
             for (t_code i : temp_codes) {
-                // check if len needs to be increased for this one, so if the amount has surpassed the allowed number of codes of the bits
-                uint32_t allowed = static_cast<uint32_t>(std::pow(2, len) - 1);
-                if (code+1 >= allowed) {
-                    len++;
-                    allowed = static_cast<uint32_t>(std::pow(2, len) - 1);
+                if (len > max_length) {
+                    len = max_length;
                 }
                 out_codes.push_back({(uint16_t)code, len, 0, (uint16_t)i.value});
                 code++;
+                if (code >= (1 << len)) {
+                    len++;
+                }
             }
             return out_codes;
         }
@@ -286,8 +290,8 @@ private:
                 c_map.addOccur(buffer[i]);
             }
         }
-        FlatHuffmanTree tree(c_map.generateCodes());
-        FlatHuffmanTree dist_tree(dist_codes.generateCodes());
+        FlatHuffmanTree tree(c_map.generateCodes(MAX_LITLEN_CODE_LEN, 2));
+        FlatHuffmanTree dist_tree(dist_codes.generateCodes(MAX_DIST_CODE_LEN, 2));
         return std::pair<FlatHuffmanTree, FlatHuffmanTree> (tree, dist_tree);
     }
     struct compare_code_value {
@@ -314,21 +318,21 @@ private:
                 if (bytes[i] == 0) {
                     if (reps <= 10) {
                         cm.addOccur(17);
-                        i += reps;
+                        i += reps + 1;
                     } else {
                         cm.addOccur(18);
-                        i += (reps <= 138) ? reps : 138;
+                        i += (reps <= 138) ? reps + 1 : 138;
                     }
                 } else {
                     cm.addOccur(16);
-                    i += (reps <= 6) ? reps : 6;
+                    i += (reps <= 6) ? reps + 1 : 6;
                 }
             } else {
                 cm.addOccur(bytes[i]);
                 i++;
             }
         }
-        std::vector<Code> t_codes = cm.generateCodes();
+        std::vector<Code> t_codes = cm.generateCodes(MAX_PRE_CODE_LEN, 3);
         std::vector <Code> test_codes;
         test_codes.push_back({16, 7, 0, 16});
         test_codes.push_back({17, 3, 0, 17});
@@ -560,7 +564,7 @@ public:
         size_t out_index = 0;
         while (!q) {
             std::streampos p = sp - fi.tellg();
-            if (p > 0 && buffer.size() < 32768) {
+            if (p > 0 && buffer.size() < KB32) {
                 c = fi.get();
                 buffer.push_back(c);
             } else {
@@ -568,7 +572,7 @@ public:
                 if (p <= 0) {
                     q = true;
                 }
-                LZ77 lz(32768);
+                LZ77 lz(KB32);
                 // finding the matches above length of 2
                 std::vector<Match> matches = lz.getMatches(buffer);
                 std::sort(matches.begin(), matches.end(), match_index_comp());
@@ -608,14 +612,14 @@ public:
         size_t out_index = 0;
         std::vector<uint8_t> out_data;
          while (!q) {
-            for (; index < data_size && buffer.size() < 32768; index++) {
+            for (; index < data_size && buffer.size() < KB32; index++) {
                 buffer.push_back(data[index]);
             }
             // writing the block out to file
             if (index >= data_size) {
                 q = true;
             }
-            LZ77 lz(32768);
+            LZ77 lz(KB32);
             // finding the matches above length of 2
             std::vector<Match> matches = lz.getMatches(buffer);
             std::sort(matches.begin(), matches.end(), match_index_comp());
