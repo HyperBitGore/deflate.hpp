@@ -355,33 +355,34 @@ private:
     static void compressDynamicHuffmanTreeCodes (std::vector<uint8_t>& bytes, Bitstream& bs, FlatHuffmanTree& code_tree) {
         for (uint32_t i = 0; i < bytes.size();) {
             uint32_t reps = countRepeats(bytes, i);
-            uint32_t code = 0;
+
+            Code c = code_tree.getCodeValue(bytes[i]);
+            bs.addBits(c.code, c.len);
             uint32_t inc = 1;
             if (reps > 2) {
+                uint32_t reps_code;
                 if (bytes[i] == 0) {
                     if (reps <= 10) {
-                        code = 17;
-                        inc = (reps < 10) ? reps : 10;
+                        reps_code = 17;
+                        inc += (reps < 10) ? reps : 10;
                     } else {
-                        code = 18;
-                        inc = (reps < 138) ? reps : 138; 
+                        reps_code = 18;
+                        inc += (reps < 138) ? reps : 138; 
                     }
                 } else {
-                    code = 16;
-                    inc = (reps < 6) ? reps : 6;
+                    reps_code = 16;
+                    inc += (reps < 6) ? reps : 6;
                 }
-            } else {
-            code = bytes[i];
-            }
-            Code c = code_tree.getCodeValue(code);
-            bs.addBits(c.code, c.len);
-            if (c.extra_bits > 0) {
-                uint32_t start = 3;
-                if (c.value == 18) {
-                    start = 11;
+                c = code_tree.getCodeValue(reps_code);
+                bs.addBits(c.code, c.len);
+                if (c.extra_bits > 0) {
+                    uint32_t start = 3;
+                    if (c.value == 18) {
+                        start = 11;
+                    }
+                    uint32_t val = inc - start;
+                    bs.addBits(val, c.extra_bits);
                 }
-                uint32_t val = reps - start;
-                bs.addBits(val, c.extra_bits);
             }
             i += inc;
         }
