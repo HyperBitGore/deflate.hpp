@@ -50,38 +50,15 @@ private:
             return 0;
         }
         std::vector<Code> generateCodes (uint32_t max_length, uint32_t len_start) {   
-            struct t_code {
-                uint32_t occurs;
-                uint32_t value;
-            };
-            std::vector <t_code> temp_codes;
+            std::vector <PreCode> temp_codes;
             for (uint32_t i = 0; i < 300; i++) {
                 uint32_t occurs = getOccur(i);
                 if (occurs) {
-                    // std::cout << "hit: " << i << ", occurs: " << occurs << "\n";
-                    temp_codes.push_back({occurs, i});
+                    temp_codes.push_back({(int32_t)i, occurs});
                 }
             }
-
-            struct compare_tcode {
-                inline bool operator() (const t_code& t1, const t_code& t2) {
-                    return t1.occurs > t2.occurs;
-                }
-            };
-            std::sort(temp_codes.begin(), temp_codes.end(), compare_tcode());
-            int32_t len = len_start;
-            uint16_t code = (1 << (len - 1));
-            std::vector <Code> out_codes;
-            for (t_code i : temp_codes) {
-                if (len > max_length) {
-                    len = max_length;
-                }
-                out_codes.push_back({(uint16_t)code, len, 0, (uint16_t)i.value});
-                code++;
-                if (code >= (1 << len)) {
-                    len++;
-                }
-            }
+            FlatHuffmanTree temp_f(temp_codes);
+            std::vector<Code> out_codes = temp_f.decode();
             return out_codes;
         }
     };

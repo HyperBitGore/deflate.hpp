@@ -14,6 +14,7 @@
 //          -code lengths were broken because there were too many codes per length
 //          -construct proper code lens based on libdeflate strategy, but flatten
 //              -optimal method for generating length-limited Huffman codes! (figure this out)
+//              -construct a tree to begin with so code assignment is correct, don't try and brute force the shit!!!
 //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
 //  -add error checking and maybe test files lol
 //  -optimize
@@ -44,6 +45,11 @@ class deflate_compressor {
         uint16_t value; //original value
     };
 
+    struct PreCode {
+        int32_t value;
+        uint32_t occurs;
+    };
+
     class FlatHuffmanTree {
         private:
             struct Member {
@@ -51,11 +57,16 @@ class deflate_compressor {
                 uint16_t code;
                 int32_t len;
                 uint8_t extra_bits = 0;
-                int left;
-                int right;
+                int32_t left;
+                int32_t right;
+            };
+            struct PreMember {
+                PreCode p;
+                int32_t left = -1;
+                int32_t right = -1;
             };
             std::vector<Member> members;
-            int head = -1;
+            int32_t head = -1;
 
             void insert (Code c) {
                 if (head == -1) {
@@ -136,6 +147,76 @@ class deflate_compressor {
                 }
             }
 
+            std::pair<PreCode, uint32_t> findPreCode (std::vector<PreMember>& pre_tree, int32_t index, uint32_t value, uint32_t build) {
+                if (pre_tree[index].p.value == value) {
+                    return {pre_tree[index].p, build};
+                }
+                std::pair<PreCode, uint32_t> left = {{-1, 0}, 0};
+                if (pre_tree[index].left != -1) {
+                    uint32_t lb = build << 1;
+                    left = findPreCode(pre_tree, pre_tree[index].left, value, build+1);
+                }
+                std::pair<PreCode, uint32_t> right = {{-1, 0}, 0};
+                if (pre_tree[index].right != -1) {
+                    uint32_t rb = (build << 1) | 1;
+                    right = findPreCode(pre_tree, pre_tree[index].right, value, build + 1);
+                }
+                if (left.first.value != -1) {
+                    return left;
+                }
+                if (right.first.value != -1) {
+                    return right;
+                }
+                return {{-1, 0}, 0};
+            }
+
+            // The tree is built by repeatedly combining the two least frequent symbols or trees, assigning them longer codes as the process progresses.
+            void construct (std::vector<PreCode>& precodes) {
+                // sort the codes based on freq, then sort by smallest value upward
+                struct {
+                    bool operator()(PreCode a, PreCode b) const { 
+                        if (a.occurs < b.occurs) return true;
+                        if (b.occurs < a.occurs) return false;
+
+                        if (a.value < b.value) return true;
+                        if (b.value < a.value) return false;
+                        return false;
+                    }
+                } compareCode;
+                std::sort(precodes.begin(), precodes.end(), compareCode);
+                std::vector<PreMember> pre_membs;
+                for (auto& i : precodes) {
+                    pre_membs.push_back({{i.value, i.occurs}, -1, -1});
+                }
+                // now we have sorted list
+                // combine the two least frequent till we have nothing left
+                std::vector<PreMember> output_array;
+                for (int32_t i = 0; i < pre_membs.size();) {
+                    if (pre_membs.size() == 1) {
+                        output_array.push_back(pre_membs[i]);
+                        pre_membs.erase(pre_membs.begin());
+                    } else {
+                        PreMember p1 = pre_membs[i];
+                        PreMember p2 = pre_membs[i+1];
+                        pre_membs.erase(pre_membs.begin());
+                        pre_membs.erase(pre_membs.begin());
+                        output_array.push_back(p1);
+                        output_array.push_back(p2);
+                        PreMember comb = {{-1, p1.p.occurs+p2.p.occurs}, (int32_t)output_array.size() - 2, (int32_t)output_array.size() - 1};
+                        pre_membs.push_back(comb);
+                    }
+                }
+                int32_t head = output_array.size() - 1;
+                std::vector<Code> codes;
+                // constructing actual codes
+                for (auto& i : precodes) {
+                    std::pair<PreCode, uint32_t> val = findPreCode(output_array, head, i.value, 0);
+                    uint32_t output = val.second;
+                    codes.push_back({0, (int32_t)output, 0, (uint16_t)i.value});
+                }
+                construct(codes);
+            }
+
             Member findMemberCode (uint32_t code, uint32_t len) {
                 int index = head;
                 uint32_t bit = 0;
@@ -194,6 +275,9 @@ class deflate_compressor {
             }
             FlatHuffmanTree (std::vector<Code> codes){
                 construct(codes);
+            }
+            FlatHuffmanTree (std::vector<PreCode> precodes) {
+                construct(precodes);
             }
 
             //copy constructor, not really, ptr is the same lol
