@@ -11,11 +11,7 @@
 // deflate
 //  -update implementation
 //      -fix dynamic huffman trees/blocks
-//          -code lengths were broken because there were too many codes per length
-//          -construct proper code lens based on libdeflate strategy, but flatten
-//              -optimal method for generating length-limited Huffman codes! (figure this out)
-//              -construct a tree to begin with so code assignment is correct, don't try and brute force the shit!!!
-//              -figure out why we are repeating more lengths than available! (def compressDynamicHuffmanTreeCodes in some way)
+//          -tree is readable now, but actual compressed block isn't yet!
 //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
 //  -add error checking and maybe test files lol
 //  -optimize

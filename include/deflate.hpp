@@ -352,39 +352,50 @@ private:
             }
         }
     }
+    // need to be able to repeat two in a row, so no break ups (look at infgen output for more detail)
     static void compressDynamicHuffmanTreeCodes (std::vector<uint8_t>& bytes, Bitstream& bs, FlatHuffmanTree& code_tree) {
         for (uint32_t i = 0; i < bytes.size();) {
             uint32_t reps = countRepeats(bytes, i);
-
-            Code c = code_tree.getCodeValue(bytes[i]);
-            bs.addBits(c.code, c.len);
-            uint32_t inc = 1;
+            Code c;
+            uint32_t inc = 0;
+            if (bytes[i] != 0 || (reps <= 2 && bytes[i] == 0)) {
+                c = code_tree.getCodeValue(bytes[i]);
+                bs.addBits(flipBits(c.code, c.len), c.len);
+                // std::cout << "writing " << (uint32_t)bytes[i] << "\n";
+                inc = 1;
+            }
             if (reps > 2) {
                 uint32_t reps_code;
+                uint32_t real_reps;
                 if (bytes[i] == 0) {
                     if (reps <= 10) {
                         reps_code = 17;
                         inc += (reps < 10) ? reps : 10;
+                        real_reps = (reps < 10) ? reps : 10;
                     } else {
                         reps_code = 18;
-                        inc += (reps < 138) ? reps : 138; 
+                        inc += (reps < 138) ? reps : 138;
+                        real_reps = (reps < 138) ? reps : 138;
                     }
                 } else {
                     reps_code = 16;
                     inc += (reps < 6) ? reps : 6;
+                    real_reps = (reps < 6) ? reps : 6;
                 }
+                // std::cout << "Repeating " << (uint32_t)bytes[i] << "," << real_reps << " times\n";
                 c = code_tree.getCodeValue(reps_code);
-                bs.addBits(c.code, c.len);
+                bs.addBits(flipBits(c.code, c.len), c.len);
                 if (c.extra_bits > 0) {
                     uint32_t start = 3;
                     if (c.value == 18) {
                         start = 11;
                     }
-                    uint32_t val = inc - start;
+                    uint32_t val = (real_reps) - start;
                     bs.addBits(val, c.extra_bits);
                 }
             }
             i += inc;
+            // std::cout << "current i: " << i << "\n";
         }
     }
     static void writeDynamicHuffmanTree (Bitstream& bs, std::vector<Match>& matches, FlatHuffmanTree tree, FlatHuffmanTree dist_tree, RangeLookup rl, RangeLookup dl) {
@@ -398,7 +409,7 @@ private:
                 }
             }
             Range range = rl.lookup(matches_size);
-            matches_size = range.code - 257;
+            matches_size = range.code - 257 + 1;
         }
         // HLIT
         bs.addBits(matches_size, 5);
