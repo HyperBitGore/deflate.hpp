@@ -49,7 +49,7 @@ private:
             }
             return 0;
         }
-        std::vector<Code> generateCodes (uint32_t max_length, uint32_t len_start) {   
+        std::vector<Code> generateCodes (uint32_t max_length) {   
             std::vector <PreCode> temp_codes;
             for (uint32_t i = 0; i < 300; i++) {
                 uint32_t occurs = getOccur(i);
@@ -60,6 +60,16 @@ private:
             FlatHuffmanTree temp_f(temp_codes);
             std::vector<Code> out_codes = temp_f.decode();
             return out_codes;
+        }
+        FlatHuffmanTree generateTree () {
+            std::vector <PreCode> temp_codes;
+            for (uint32_t i = 0; i < 300; i++) {
+                uint32_t occurs = getOccur(i);
+                if (occurs) {
+                    temp_codes.push_back({(int32_t)i, occurs});
+                }
+            }
+            return  FlatHuffmanTree(temp_codes);
         }
     };
     class Bitstream {
@@ -267,8 +277,8 @@ private:
                 c_map.addOccur(buffer[i]);
             }
         }
-        FlatHuffmanTree tree(c_map.generateCodes(MAX_LITLEN_CODE_LEN, 2));
-        FlatHuffmanTree dist_tree(dist_codes.generateCodes(MAX_DIST_CODE_LEN, 2));
+        FlatHuffmanTree tree = c_map.generateTree();
+        FlatHuffmanTree dist_tree = dist_codes.generateTree();
         return std::pair<FlatHuffmanTree, FlatHuffmanTree> (tree, dist_tree);
     }
     struct compare_code_value {
@@ -309,7 +319,7 @@ private:
                 i++;
             }
         }
-        std::vector<Code> t_codes = cm.generateCodes(MAX_PRE_CODE_LEN, 3);
+        std::vector<Code> t_codes = cm.generateCodes(MAX_PRE_CODE_LEN);
         std::vector <Code> test_codes;
         test_codes.push_back({16, 7, 0, 16});
         test_codes.push_back({17, 3, 0, 17});

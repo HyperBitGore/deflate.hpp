@@ -1,8 +1,10 @@
 #pragma once
 #include <cmath>
+#include <iostream>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <queue>
 #include <vector>
 #include <algorithm>
 #include <string>
@@ -12,6 +14,7 @@
 //  -update implementation
 //      -fix dynamic huffman trees/blocks
 //          -tree is readable now, but actual compressed block isn't yet!
+//          -code length assignment probably still bad! (maybe construct length from left and rights in precode construct??)
 //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
 //  -add error checking and maybe test files lol
 //  -optimize
@@ -143,74 +146,79 @@ class deflate_compressor {
                     }
                 }
             }
-
-            std::pair<PreCode, uint32_t> findPreCode (std::vector<PreMember>& pre_tree, int32_t index, uint32_t value, uint32_t build) {
-                if (pre_tree[index].p.value == value) {
-                    return {pre_tree[index].p, build};
+            struct PreCodeGen {
+                PreCode p;
+                uint32_t bit_length;
+                uint32_t code;
+            };
+            PreCodeGen findPreCode (std::vector<PreMember>& pre_tree, int32_t index, uint32_t value, uint32_t cur_bit, uint32_t construct) {
+                if (pre_tree[index].p.value != -1 && pre_tree[index].p.value == value && pre_tree[index].left == -1 && pre_tree[index].right == -1) {
+                    return {pre_tree[index].p, cur_bit, construct};
                 }
-                std::pair<PreCode, uint32_t> left = {{-1, 0}, 0};
+                PreCodeGen left = {{-1, 0}, 0};
                 if (pre_tree[index].left != -1) {
-                    uint32_t lb = build << 1;
-                    left = findPreCode(pre_tree, pre_tree[index].left, value, build+1);
+                    uint32_t lb = construct << 1;
+                    left = findPreCode(pre_tree, pre_tree[index].left, value, cur_bit + 1, lb);
                 }
-                std::pair<PreCode, uint32_t> right = {{-1, 0}, 0};
+                PreCodeGen right = {{-1, 0}, 0};
                 if (pre_tree[index].right != -1) {
-                    uint32_t rb = (build << 1) | 1;
-                    right = findPreCode(pre_tree, pre_tree[index].right, value, build + 1);
+                    uint32_t rb = (construct << 1) | 1;
+                    right = findPreCode(pre_tree, pre_tree[index].right, value, cur_bit + 1, rb);
                 }
-                if (left.first.value != -1) {
+                if (left.p.value != -1) {
                     return left;
                 }
-                if (right.first.value != -1) {
+                if (right.p.value != -1) {
                     return right;
                 }
                 return {{-1, 0}, 0};
             }
-
             // The tree is built by repeatedly combining the two least frequent symbols or trees, assigning them longer codes as the process progresses.
             void construct (std::vector<PreCode>& precodes) {
-                // sort the codes based on freq, then sort by smallest value upward
-                struct {
-                    bool operator()(PreCode a, PreCode b) const { 
-                        if (a.occurs < b.occurs) return true;
-                        if (b.occurs < a.occurs) return false;
-
-                        if (a.value < b.value) return true;
-                        if (b.value < a.value) return false;
-                        return false;
+                // prio queue sorter
+                struct ComparePreMembers {
+                    inline bool operator() (const PreMember p1, const PreMember p2) {
+                        return p1.p.occurs > p2.p.occurs;
                     }
-                } compareCode;
-                std::sort(precodes.begin(), precodes.end(), compareCode);
-                std::vector<PreMember> pre_membs;
+                };
+                std::priority_queue<PreMember, std::vector<PreMember>, ComparePreMembers> pq;
                 for (auto& i : precodes) {
-                    pre_membs.push_back({{i.value, i.occurs}, -1, -1});
+                    pq.push({{i.value, i.occurs}, -1, -1});
                 }
-                // now we have sorted list
                 // combine the two least frequent till we have nothing left
+                // actually need to find two least frequent here big guy!! (this is actually worse somehow)
+                // tree is uneven for some reason?
                 std::vector<PreMember> output_array;
-                for (int32_t i = 0; i < pre_membs.size();) {
-                    if (pre_membs.size() == 1) {
-                        output_array.push_back(pre_membs[i]);
-                        pre_membs.erase(pre_membs.begin());
+                while (!pq.empty()) {
+                    if (pq.size() == 1) {
+                        output_array.push_back(pq.top());
+                        pq.pop();
                     } else {
-                        PreMember p1 = pre_membs[i];
-                        PreMember p2 = pre_membs[i+1];
-                        pre_membs.erase(pre_membs.begin());
-                        pre_membs.erase(pre_membs.begin());
+                        PreMember p1 = pq.top();
+                        pq.pop();
+                        PreMember p2 = pq.top();
+                        pq.pop();
                         output_array.push_back(p1);
                         output_array.push_back(p2);
                         PreMember comb = {{-1, p1.p.occurs+p2.p.occurs}, (int32_t)output_array.size() - 2, (int32_t)output_array.size() - 1};
-                        pre_membs.push_back(comb);
+                        pq.push(comb);
                     }
                 }
                 int32_t head = output_array.size() - 1;
                 std::vector<Code> codes;
-                // constructing actual codes
+                // constructing code lengths
                 for (auto& i : precodes) {
-                    std::pair<PreCode, uint32_t> val = findPreCode(output_array, head, i.value, 0);
-                    uint32_t output = val.second;
-                    codes.push_back({0, (int32_t)output, 0, (uint16_t)i.value});
+                    PreCodeGen val = findPreCode(output_array, head, i.value, 0, 0);
+                    std::cout << val.p.value << ":" << val.bit_length << "\n";
+                    codes.push_back({0, (int32_t)val.bit_length, 0, (uint16_t)i.value});
                 }
+                // for testing
+                struct {
+                    bool operator() (const Code c1, const Code c2) const {
+                        return c1.value < c2.value;
+                    }
+                } compareRCode;
+                std::sort(codes.begin(), codes.end(), compareRCode);
                 construct(codes);
             }
 

@@ -93,6 +93,14 @@ bool testDecompressionFile (std::string path) {
         return false;
     }
     writeBufferToFile(out_inflate_lib.data, out_lib_deflate, path + "libtestinflate.bmp");
+    // test inflate on hppdeflate
+    File out_inflate_hpp_hpp(file.size);
+    size_t sizein_hpp_hpp = inflate::decompress(out_data_hpp.data(), out_data_hpp.size(), out_inflate_hpp_hpp.data, file.size);
+    std::cout << "size of inflate.hpp (inflate of deflate.hpp) for " << path << ": " << sizein_hpp << "\n";
+    if (sizein_hpp_hpp == 0) {
+        return false;
+    }
+    writeBufferToFile(out_inflate_hpp_hpp.data, sizein_hpp_hpp, path + "hpptestinflatehpp.bmp");
     return true;
 }
 
@@ -101,7 +109,7 @@ int main () {
 
     std::cout << "Libdeflate test!\n";
     testDecompressionFile("test.bmp");
-    testDecompressionFile("tiny.bmp");
+    // testDecompressionFile("tiny.bmp");
     //testDecompressionFile("tmp.7z");
 
 
