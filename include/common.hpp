@@ -4,7 +4,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <queue>
 #include <vector>
 #include <algorithm>
 #include <string>
@@ -15,6 +14,8 @@
 //      -fix dynamic huffman trees/blocks
 //          -tree is readable now, but actual compressed block isn't yet!
 //          -code length assignment probably still bad! (maybe construct length from left and rights in precode construct??)
+//          -copy libdeflate's method (build_tree)
+//          -https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
 //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
 //  -add error checking and maybe test files lol
 //  -optimize
@@ -173,6 +174,17 @@ class deflate_compressor {
                 }
                 return {{-1, 0}, 0};
             }
+
+            uint32_t findLowestOccur (std::vector<PreMember>& vec) {
+                uint32_t low = 0;
+                for (uint32_t i = 0; i < vec.size(); i++) {
+                    if (vec[i].p.occurs < vec[low].p.occurs) {
+                        low = i;
+                    }
+                }
+                return low;
+            }
+            // https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
             // The tree is built by repeatedly combining the two least frequent symbols or trees, assigning them longer codes as the process progresses.
             void construct (std::vector<PreCode>& precodes) {
                 // prio queue sorter
@@ -181,9 +193,9 @@ class deflate_compressor {
                         return p1.p.occurs > p2.p.occurs;
                     }
                 };
-                std::priority_queue<PreMember, std::vector<PreMember>, ComparePreMembers> pq;
+                std::vector<PreMember> pq;
                 for (auto& i : precodes) {
-                    pq.push({{i.value, i.occurs}, -1, -1});
+                    pq.push_back({{i.value, i.occurs}, -1, -1});
                 }
                 // combine the two least frequent till we have nothing left
                 // actually need to find two least frequent here big guy!! (this is actually worse somehow)
@@ -191,17 +203,21 @@ class deflate_compressor {
                 std::vector<PreMember> output_array;
                 while (!pq.empty()) {
                     if (pq.size() == 1) {
-                        output_array.push_back(pq.top());
-                        pq.pop();
+                        output_array.push_back(pq[0]);
+                        pq.erase(pq.begin());
                     } else {
-                        PreMember p1 = pq.top();
-                        pq.pop();
-                        PreMember p2 = pq.top();
-                        pq.pop();
+                        // first
+                        uint32_t low = findLowestOccur(pq);
+                        PreMember p1 = pq[low];
                         output_array.push_back(p1);
+                        pq.erase(pq.begin() + low);
+                        // second
+                        low = findLowestOccur(pq);
+                        PreMember p2 = pq[low];
                         output_array.push_back(p2);
+                        pq.erase(pq.begin() + low);
                         PreMember comb = {{-1, p1.p.occurs+p2.p.occurs}, (int32_t)output_array.size() - 2, (int32_t)output_array.size() - 1};
-                        pq.push(comb);
+                        pq.push_back(comb);
                     }
                 }
                 int32_t head = output_array.size() - 1;
