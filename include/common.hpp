@@ -1,9 +1,9 @@
 #pragma once
-#include <cmath>
 #include <iostream>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <queue>
 #include <vector>
 #include <algorithm>
 #include <string>
@@ -15,6 +15,8 @@
 //          -tree is readable now, but actual compressed block isn't yet!
 //          -code length assignment probably still bad! (maybe construct length from left and rights in precode construct??)
 //          -copy libdeflate's method (build_tree)
+//          -maybe it's code assignment??
+//          -compute_length_counts
 //          -https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
 //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
 //  -add error checking and maybe test files lol
@@ -147,33 +149,29 @@ class deflate_compressor {
                     }
                 }
             }
-            struct PreCodeGen {
-                PreCode p;
-                uint32_t bit_length;
-                uint32_t code;
-            };
-            PreCodeGen findPreCode (std::vector<PreMember>& pre_tree, int32_t index, uint32_t value, uint32_t cur_bit, uint32_t construct) {
-                if (pre_tree[index].p.value != -1 && pre_tree[index].p.value == value && pre_tree[index].left == -1 && pre_tree[index].right == -1) {
-                    return {pre_tree[index].p, cur_bit, construct};
+            
+            PreMember* findPreMemb (std::vector<PreMember>& tree, int32_t index, uint32_t value, int32_t d, uint32_t* depth) {
+                if (tree[index].p.value == value) {
+                    *depth = d;
+                    return &tree[index];
                 }
-                PreCodeGen left = {{-1, 0}, 0};
-                if (pre_tree[index].left != -1) {
-                    uint32_t lb = construct << 1;
-                    left = findPreCode(pre_tree, pre_tree[index].left, value, cur_bit + 1, lb);
+                PreMember* left = nullptr;
+                PreMember* right = nullptr;
+                if (tree[index].left != -1) {
+                    left = findPreMemb(tree, tree[index].left, value, d + 1, depth);
                 }
-                PreCodeGen right = {{-1, 0}, 0};
-                if (pre_tree[index].right != -1) {
-                    uint32_t rb = (construct << 1) | 1;
-                    right = findPreCode(pre_tree, pre_tree[index].right, value, cur_bit + 1, rb);
+                if (tree[index].right != -1) {
+                    right = findPreMemb(tree, tree[index].right, value, d + 1, depth);
                 }
-                if (left.p.value != -1) {
+                if (left != nullptr) {
                     return left;
                 }
-                if (right.p.value != -1) {
+                if (right != nullptr) {
                     return right;
                 }
-                return {{-1, 0}, 0};
+                return nullptr;
             }
+            
 
             uint32_t findLowestOccur (std::vector<PreMember>& vec) {
                 uint32_t low = 0;
@@ -187,12 +185,6 @@ class deflate_compressor {
             // https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
             // The tree is built by repeatedly combining the two least frequent symbols or trees, assigning them longer codes as the process progresses.
             void construct (std::vector<PreCode>& precodes) {
-                // prio queue sorter
-                struct ComparePreMembers {
-                    inline bool operator() (const PreMember p1, const PreMember p2) {
-                        return p1.p.occurs > p2.p.occurs;
-                    }
-                };
                 std::vector<PreMember> pq;
                 for (auto& i : precodes) {
                     pq.push_back({{i.value, i.occurs}, -1, -1});
@@ -223,10 +215,26 @@ class deflate_compressor {
                 int32_t head = output_array.size() - 1;
                 std::vector<Code> codes;
                 // constructing code lengths
+                // rewrite all this shit right here
+                struct Lens {
+                    std::queue<PreMember*> p;
+                    uint16_t depth;
+                    Lens () {
+                        depth = 0;
+                    }
+                };
+                Lens code_lens[16] = {};
                 for (auto& i : precodes) {
-                    PreCodeGen val = findPreCode(output_array, head, i.value, 0, 0);
-                    std::cout << val.p.value << ":" << val.bit_length << "\n";
-                    codes.push_back({0, (int32_t)val.bit_length, 0, (uint16_t)i.value});
+                    uint32_t depth = 0;
+                    PreMember* pre = findPreMemb(output_array, head, i.value, 0, &depth);
+                    code_lens[depth].p.push(pre);
+                    code_lens[depth].depth++;
+                }
+                for (uint8_t i = 15; i >= 1; i--) {
+                    while (code_lens[i].depth--) {
+                        codes.push_back({0, i, 0, (uint16_t)code_lens[i].p.front()->p.value});
+                        code_lens[i].p.pop();
+                    }
                 }
                 // for testing
                 struct {
