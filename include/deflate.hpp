@@ -603,6 +603,9 @@ public:
     }
 
     static std::vector<uint8_t> compress (char* data, size_t data_size) {
+        // std::vector<PreCode> pre_codes = {{'A', 45}, {'B', 13}, {'C', 12}, {'D', 16}, 
+        // {'E', 9}, {'F', 5}};
+        // FlatHuffmanTree pre_codes_test(pre_codes);
         FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
         FlatHuffmanTree fixed_huffman(generateFixedCodes());
         bool q = false;

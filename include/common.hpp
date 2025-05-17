@@ -171,69 +171,51 @@ class deflate_compressor {
                 }
                 return nullptr;
             }
-            
-
-            uint32_t findLowestOccur (std::vector<PreMember>& vec) {
-                uint32_t low = 0;
-                for (uint32_t i = 0; i < vec.size(); i++) {
-                    if (vec[i].p.occurs < vec[low].p.occurs) {
-                        low = i;
-                    }
-                }
-                return low;
-            }
             // https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
             // The tree is built by repeatedly combining the two least frequent symbols or trees, assigning them longer codes as the process progresses.
             void construct (std::vector<PreCode>& precodes) {
-                std::vector<PreMember> pq;
+                struct Compare {
+                    bool operator()(PreMember l, PreMember r) {
+                        return l.p.occurs > r.p.occurs;
+                    }
+                };
+                std::priority_queue<PreMember, std::vector<PreMember>, Compare> pq;
                 for (auto& i : precodes) {
-                    pq.push_back({{i.value, i.occurs}, -1, -1});
+                    std::cout << i.value << " : " << i.occurs << "\n";
+                    pq.push({{i.value, i.occurs}, -1, -1});
                 }
                 // combine the two least frequent till we have nothing left
-                // actually need to find two least frequent here big guy!! (this is actually worse somehow)
-                // tree is uneven for some reason?
                 std::vector<PreMember> output_array;
                 while (!pq.empty()) {
                     if (pq.size() == 1) {
-                        output_array.push_back(pq[0]);
-                        pq.erase(pq.begin());
+                        output_array.push_back(pq.top());
+                        pq.pop();
                     } else {
                         // first
-                        uint32_t low = findLowestOccur(pq);
-                        PreMember p1 = pq[low];
+                        PreMember p1 = pq.top();
                         output_array.push_back(p1);
-                        pq.erase(pq.begin() + low);
+                        pq.pop();
                         // second
-                        low = findLowestOccur(pq);
-                        PreMember p2 = pq[low];
+                        PreMember p2 = pq.top();
                         output_array.push_back(p2);
-                        pq.erase(pq.begin() + low);
+                        pq.pop();
                         PreMember comb = {{-1, p1.p.occurs+p2.p.occurs}, (int32_t)output_array.size() - 2, (int32_t)output_array.size() - 1};
-                        pq.push_back(comb);
+                        pq.push(comb);
                     }
                 }
                 int32_t head = output_array.size() - 1;
                 std::vector<Code> codes;
-                // constructing code lengths
-                // rewrite all this shit right here
-                struct Lens {
-                    std::queue<PreMember*> p;
-                    uint16_t depth;
-                    Lens () {
-                        depth = 0;
-                    }
-                };
-                Lens code_lens[16] = {};
+                // constructing code lengths, this is the issue I believe!
+                std::queue<PreMember*> code_lens[16] = {};
                 for (auto& i : precodes) {
                     uint32_t depth = 0;
                     PreMember* pre = findPreMemb(output_array, head, i.value, 0, &depth);
-                    code_lens[depth].p.push(pre);
-                    code_lens[depth].depth++;
+                    code_lens[depth].push(pre);
                 }
                 for (uint8_t i = 15; i >= 1; i--) {
-                    while (code_lens[i].depth--) {
-                        codes.push_back({0, i, 0, (uint16_t)code_lens[i].p.front()->p.value});
-                        code_lens[i].p.pop();
+                    while (code_lens[i].size() > 0) {
+                        codes.push_back({0, i, 0, (uint16_t)code_lens[i].front()->p.value});
+                        code_lens[i].pop();
                     }
                 }
                 // for testing
@@ -242,7 +224,11 @@ class deflate_compressor {
                         return c1.value < c2.value;
                     }
                 } compareRCode;
+                std::cout << "Code lengths: \n";
                 std::sort(codes.begin(), codes.end(), compareRCode);
+                for (auto& i : codes) {
+                    std::cout << i.value << " : " << i.len << "\n";
+                }
                 construct(codes);
             }
 
