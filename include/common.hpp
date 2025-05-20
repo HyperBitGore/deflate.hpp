@@ -11,9 +11,7 @@
 #include <fstream>
 
 // deflate
-//  -update implementation
-//      -fix dynamic huffman blocks
-//          -the extra bits are missing for dynamic huffman trees
+//  -add file version
 //  -add error checking and maybe test files lol
 //  -optimize
 
@@ -190,7 +188,7 @@ class deflate_compressor {
                 };
                 std::priority_queue<PreMember, std::vector<PreMember>, Compare> pq;
                 for (auto& i : precodes) {
-                    std::cout << i.value << " : " << i.occurs << "\n";
+                    // std::cout << i.value << " : " << i.occurs << "\n";
                     pq.push({{i.value, i.occurs}, -1, -1});
                 }
                 // combine the two least frequent till we have nothing left
@@ -253,12 +251,12 @@ class deflate_compressor {
                         return c1.value < c2.value;
                     }
                 } compareRCode;
-                std::cout << "Code lengths: \n";
+                // std::cout << "Code lengths: \n";
                 std::sort(codes.begin(), codes.end(), compareRCode);
                 //for (auto& i : codes) {
                   //  std::cout << i.value << " : " << i.len << "\n";
                 //}
-                std::cout << checkCodesOversubscribed(codes) << "\n";
+                // std::cout << checkCodesOversubscribed(codes) << "\n";
                 construct(codes);
             }
 

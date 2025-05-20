@@ -109,8 +109,8 @@ int main () {
 
     std::cout << "Libdeflate test!\n";
     testDecompressionFile("test.bmp");
-    // testDecompressionFile("tiny.bmp");
-    //testDecompressionFile("tmp.7z");
+    testDecompressionFile("tiny.bmp");
+    // testDecompressionFile("tmp.7z");
 
 
     return 0;

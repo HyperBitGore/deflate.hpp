@@ -69,7 +69,7 @@ private:
                     temp_codes.push_back({(int32_t)i, occurs});
                 }
             }
-            return  FlatHuffmanTree(temp_codes);
+            return FlatHuffmanTree(temp_codes);
         }
     };
     class Bitstream {
@@ -518,16 +518,16 @@ private:
                 Code c = tree.getCodeValue(lookup.code);
                 bs.addBits(flipBits(c.code, c.len), c.len);
                 // add extra bits to bitstream
-                if (c.extra_bits > 0) {
+                if (lookup.extra_bits > 0) {
                     uint32_t extra_bits = matches[0].length % lookup.start;
-                    bs.addBits(extra_bits, c.extra_bits);
+                    bs.addBits(extra_bits, lookup.extra_bits);
                 }
                 Range dist = dl.lookup(matches[0].offset);
                 Code dic = dist_tree.getCodeValue(dist.code);
                 bs.addBits(flipBits(dic.code, dic.len), dic.len);
-                if (dic.extra_bits > 0) {
+                if (dist.extra_bits > 0) {
                     uint32_t extra_bits = matches[0].offset % dist.start;
-                    bs.addBits(extra_bits, dic.extra_bits);
+                    bs.addBits(extra_bits, dist.extra_bits);
                 }
                 i += matches[0].length;
                 matches.erase(matches.begin());
