@@ -57,7 +57,7 @@ private:
                     temp_codes.push_back({(int32_t)i, occurs});
                 }
             }
-            FlatHuffmanTree temp_f(temp_codes);
+            FlatHuffmanTree temp_f(temp_codes, max_length);
             std::vector<Code> out_codes = temp_f.decode();
             return out_codes;
         }
@@ -343,7 +343,7 @@ private:
                 }
             }
         }
-        return FlatHuffmanTree(t_codes);
+        return FlatHuffmanTree(codes);
     }
     static void writeDynamicHuffmanBytes (std::vector<Code> t_codes, std::vector<uint8_t>& bytes, size_t max) {
         std::sort(t_codes.begin(), t_codes.end(), compare_code_value());
@@ -633,7 +633,7 @@ public:
             Bitstream bs_dynamic = compressBuffer(buffer, matches, trees.first, trees.second, 0b100, q);
             Bitstream bs_out;
             if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() < bs_dynamic.getSize()) {
-                bs_out = bs_fixed;
+                bs_out = bs_dynamic;
             } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
                 bs_out = bs_dynamic;
             } else {

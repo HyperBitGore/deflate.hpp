@@ -1,4 +1,5 @@
 #pragma once
+#include <cmath>
 #include <iostream>
 #include <cstddef>
 #include <cstdint>
@@ -11,14 +12,8 @@
 
 // deflate
 //  -update implementation
-//      -fix dynamic huffman trees/blocks
-//          -tree is readable now, but actual compressed block isn't yet!
-//          -code length assignment probably still bad! (maybe construct length from left and rights in precode construct??)
-//          -copy libdeflate's method (build_tree)
-//          -maybe it's code assignment??
-//          -compute_length_counts
-//          -https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
-//      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
+//      -fix dynamic huffman blocks
+//          -the extra bits are missing for dynamic huffman trees
 //  -add error checking and maybe test files lol
 //  -optimize
 
@@ -106,19 +101,19 @@ class deflate_compressor {
                     }
                 }
             }
+            struct {
+                bool operator()(Code a, Code b) const { 
+                    if (a.len < b.len) return true;
+                    if (b.len < a.len) return false;
 
+                    if (a.value < b.value) return true;
+                    if (b.value < a.value) return false;
+                    return false;
+                }
+            } compareCode;
             void construct (std::vector<Code>& codes) {
                  // sort the codes based on len, then sort by smallest value upward
-                struct {
-                    bool operator()(Code a, Code b) const { 
-                        if (a.len < b.len) return true;
-                        if (b.len < a.len) return false;
 
-                        if (a.value < b.value) return true;
-                        if (b.value < a.value) return false;
-                        return false;
-                    }
-                } compareCode;
                 std::sort(codes.begin(), codes.end(), compareCode);
                 int32_t code = 0;
                 int32_t next_code[16] = {0};
@@ -171,9 +166,23 @@ class deflate_compressor {
                 }
                 return nullptr;
             }
+     
+            bool checkCodesOversubscribed (std::vector<Code> codes) {
+                std::sort(codes.begin(), codes.end(), compareCode);
+                double total = 0.0;
+                for (uint32_t i = 0; i < codes.size();) {
+                    double count = 0;
+                    for(size_t j = i; j < codes.size() && codes[j].len == codes[i].len; j++, count += 1.0);   
+                    double v = (count / (double)(std::pow(2, codes[i].len)));
+                    total += v;
+                    i += count;   
+                }
+                return total <= 1.0;
+            }
             // https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
+            // //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
             // The tree is built by repeatedly combining the two least frequent symbols or trees, assigning them longer codes as the process progresses.
-            void construct (std::vector<PreCode>& precodes) {
+            void construct (std::vector<PreCode>& precodes, uint32_t max_bit_length) {
                 struct Compare {
                     bool operator()(PreMember l, PreMember r) {
                         return l.p.occurs > r.p.occurs;
@@ -205,12 +214,32 @@ class deflate_compressor {
                 }
                 int32_t head = output_array.size() - 1;
                 std::vector<Code> codes;
-                // constructing code lengths, this is the issue I believe!
+                // constructing code lengths
                 std::queue<PreMember*> code_lens[16] = {};
                 for (auto& i : precodes) {
                     uint32_t depth = 0;
                     PreMember* pre = findPreMemb(output_array, head, i.value, 0, &depth);
                     code_lens[depth].push(pre);
+                }
+                // https://github.com/madler/zlib/blob/develop/trees.c
+                // https://www.infinitepartitions.com/art001.html
+                // https://www.mrbluyee.com/2024/03/28/huffman-coding-in-deflate/
+                // ripped this from zlib, move a higher level leaf down one and move two overflows up to the same level, we maintain kraft = 1
+                for (size_t bits = 15; bits > max_bit_length; bits--) {
+                    while(code_lens[bits].size() > 0) {
+                        // get the longest code which can be moved down
+                        size_t tbits = max_bit_length - 1;
+                        while (code_lens[tbits].size() == 0) tbits--;
+                        PreMember* p = code_lens[tbits].front();
+                        code_lens[tbits].pop();
+                        PreMember* p2 = code_lens[bits].front();
+                        code_lens[bits].pop();
+                        PreMember* p3 = code_lens[bits].front();
+                        code_lens[bits].pop();
+                        code_lens[tbits + 1].push(p);
+                        code_lens[tbits + 1].push(p2);
+                        code_lens[tbits + 1].push(p3);
+                    }
                 }
                 for (uint8_t i = 15; i >= 1; i--) {
                     while (code_lens[i].size() > 0) {
@@ -226,9 +255,10 @@ class deflate_compressor {
                 } compareRCode;
                 std::cout << "Code lengths: \n";
                 std::sort(codes.begin(), codes.end(), compareRCode);
-                for (auto& i : codes) {
-                    std::cout << i.value << " : " << i.len << "\n";
-                }
+                //for (auto& i : codes) {
+                  //  std::cout << i.value << " : " << i.len << "\n";
+                //}
+                std::cout << checkCodesOversubscribed(codes) << "\n";
                 construct(codes);
             }
 
@@ -292,9 +322,11 @@ class deflate_compressor {
                 construct(codes);
             }
             FlatHuffmanTree (std::vector<PreCode> precodes) {
-                construct(precodes);
+                construct(precodes, 15);
             }
-
+            FlatHuffmanTree (std::vector<PreCode> precodes, uint32_t max_bit_length) {
+                construct(precodes, max_bit_length);
+            }
             //copy constructor, not really, ptr is the same lol
             FlatHuffmanTree (const FlatHuffmanTree& huff) {
                 members = huff.members;
