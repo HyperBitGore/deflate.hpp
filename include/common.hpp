@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cstring>
 #include <queue>
+#include <stdexcept>
 #include <vector>
 #include <algorithm>
 #include <string>
@@ -12,6 +13,7 @@
 
 // deflate
 //  -fix multi chunk files breaking
+//      -probably just catch oversubscribed error and just write a fixed block
 //  -add file version
 //  -add error checking and maybe test files lol
 //  -optimize
@@ -100,7 +102,7 @@ class deflate_compressor {
                     }
                 }
             }
-            struct {
+            static struct {
                 bool operator()(Code a, Code b) const { 
                     if (a.len < b.len) return true;
                     if (b.len < a.len) return false;
@@ -144,7 +146,7 @@ class deflate_compressor {
                 }
             }
             
-            PreMember* findPreMemb (std::vector<PreMember>& tree, int32_t index, uint32_t value, int32_t d, uint32_t* depth) {
+            static PreMember* findPreMemb (std::vector<PreMember>& tree, int32_t index, uint32_t value, int32_t d, uint32_t* depth) {
                 if (tree[index].p.value == value) {
                     *depth = d;
                     return &tree[index];
@@ -165,8 +167,16 @@ class deflate_compressor {
                 }
                 return nullptr;
             }
-     
-            bool checkCodesOversubscribed (std::vector<Code> codes) {
+            
+            static constexpr double round1Up(double val) {
+                if (std::abs(1.0 - val) < 1e-4) {
+                    return 1.0;
+                }
+                return val;
+            }
+            
+
+            static double checkCodesOversubscribed (std::vector<Code> codes) {
                 std::sort(codes.begin(), codes.end(), compareCode);
                 double total = 0.0;
                 for (uint32_t i = 0; i < codes.size();) {
@@ -176,89 +186,8 @@ class deflate_compressor {
                     total += v;
                     i += count;   
                 }
-                return total <= 1.0;
-            }
-            // https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
-            // //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
-            // The tree is built by repeatedly combining the two least frequent symbols or trees, assigning them longer codes as the process progresses.
-            void construct (std::vector<PreCode>& precodes, uint32_t max_bit_length) {
-                struct Compare {
-                    bool operator()(PreMember l, PreMember r) {
-                        return l.p.occurs > r.p.occurs;
-                    }
-                };
-                std::priority_queue<PreMember, std::vector<PreMember>, Compare> pq;
-                for (auto& i : precodes) {
-                    // std::cout << i.value << " : " << i.occurs << "\n";
-                    pq.push({{i.value, i.occurs}, -1, -1});
-                }
-                // combine the two least frequent till we have nothing left
-                std::vector<PreMember> output_array;
-                while (!pq.empty()) {
-                    if (pq.size() == 1) {
-                        output_array.push_back(pq.top());
-                        pq.pop();
-                    } else {
-                        // first
-                        PreMember p1 = pq.top();
-                        output_array.push_back(p1);
-                        pq.pop();
-                        // second
-                        PreMember p2 = pq.top();
-                        output_array.push_back(p2);
-                        pq.pop();
-                        PreMember comb = {{-1, p1.p.occurs+p2.p.occurs}, (int32_t)output_array.size() - 2, (int32_t)output_array.size() - 1};
-                        pq.push(comb);
-                    }
-                }
-                int32_t head = output_array.size() - 1;
-                std::vector<Code> codes;
-                // constructing code lengths
-                std::queue<PreMember*> code_lens[16] = {};
-                for (auto& i : precodes) {
-                    uint32_t depth = 0;
-                    PreMember* pre = findPreMemb(output_array, head, i.value, 0, &depth);
-                    code_lens[depth].push(pre);
-                }
-                // https://github.com/madler/zlib/blob/develop/trees.c
-                // https://www.infinitepartitions.com/art001.html
-                // https://www.mrbluyee.com/2024/03/28/huffman-coding-in-deflate/
-                // ripped this from zlib, move a higher level leaf down one and move two overflows up to the same level, we maintain kraft = 1
-                for (size_t bits = 15; bits > max_bit_length; bits--) {
-                    while(code_lens[bits].size() > 0) {
-                        // get the longest code which can be moved down
-                        size_t tbits = max_bit_length - 1;
-                        while (code_lens[tbits].size() == 0) tbits--;
-                        PreMember* p = code_lens[tbits].front();
-                        code_lens[tbits].pop();
-                        PreMember* p2 = code_lens[bits].front();
-                        code_lens[bits].pop();
-                        PreMember* p3 = code_lens[bits].front();
-                        code_lens[bits].pop();
-                        code_lens[tbits + 1].push(p);
-                        code_lens[tbits + 1].push(p2);
-                        code_lens[tbits + 1].push(p3);
-                    }
-                }
-                for (uint8_t i = 15; i >= 1; i--) {
-                    while (code_lens[i].size() > 0) {
-                        codes.push_back({0, i, 0, (uint16_t)code_lens[i].front()->p.value});
-                        code_lens[i].pop();
-                    }
-                }
-                // for testing
-                struct {
-                    bool operator() (const Code c1, const Code c2) const {
-                        return c1.value < c2.value;
-                    }
-                } compareRCode;
-                // std::cout << "Code lengths: \n";
-                std::sort(codes.begin(), codes.end(), compareRCode);
-                //for (auto& i : codes) {
-                  //  std::cout << i.value << " : " << i.len << "\n";
-                //}
-                // std::cout << checkCodesOversubscribed(codes) << "\n";
-                construct(codes);
+                total = round1Up(total);
+                return total;
             }
 
             Member findMemberCode (uint32_t code, uint32_t len) {
@@ -320,12 +249,6 @@ class deflate_compressor {
             FlatHuffmanTree (std::vector<Code> codes){
                 construct(codes);
             }
-            FlatHuffmanTree (std::vector<PreCode> precodes) {
-                construct(precodes, 15);
-            }
-            FlatHuffmanTree (std::vector<PreCode> precodes, uint32_t max_bit_length) {
-                construct(precodes, max_bit_length);
-            }
             //copy constructor, not really, ptr is the same lol
             FlatHuffmanTree (const FlatHuffmanTree& huff) {
                 members = huff.members;
@@ -373,6 +296,110 @@ class deflate_compressor {
                     bool operator()(Code a, Code b) const { return a.value < b.value; }
                 } compareCodeV;
                 std::sort(codes.begin(), codes.end(), compareCodeV);
+                return codes;
+            }
+            // https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
+            // //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
+            // The tree is built by repeatedly combining the two least frequent symbols or trees, assigning them longer codes as the process progresses.
+            static std::vector<Code> generateCodeLengths (std::vector<PreCode> precodes, uint32_t max_bit_length) {
+                struct Compare {
+                    bool operator()(PreMember l, PreMember r) {
+                        return l.p.occurs > r.p.occurs;
+                    }
+                };
+                std::priority_queue<PreMember, std::vector<PreMember>, Compare> pq;
+                for (auto& i : precodes) {
+                    // std::cout << i.value << " : " << i.occurs << "\n";
+                    pq.push({{i.value, i.occurs}, -1, -1});
+                }
+                // combine the two least frequent till we have nothing left
+                std::vector<PreMember> output_array;
+                while (!pq.empty()) {
+                    if (pq.size() == 1) {
+                        output_array.push_back(pq.top());
+                        pq.pop();
+                    } else {
+                        // first
+                        PreMember p1 = pq.top();
+                        output_array.push_back(p1);
+                        pq.pop();
+                        // second
+                        PreMember p2 = pq.top();
+                        output_array.push_back(p2);
+                        pq.pop();
+                        PreMember comb = {{-1, p1.p.occurs+p2.p.occurs}, (int32_t)output_array.size() - 2, (int32_t)output_array.size() - 1};
+                        pq.push(comb);
+                    }
+                }
+                int32_t head = output_array.size() - 1;
+                std::vector<Code> codes;
+                // constructing code lengths
+                std::queue<PreMember*> code_lens[16] = {};
+                for (auto& i : precodes) {
+                    uint32_t depth = 0;
+                    PreMember* pre = findPreMemb(output_array, head, i.value, 0, &depth);
+                    // this shouldn't happen but is possible and will corrupt entire stack so better off
+                    if (depth > 15) {
+                        depth = 15;
+                    }
+                    code_lens[depth].push(pre);
+                }
+                // https://github.com/madler/zlib/blob/develop/trees.c
+                // https://www.infinitepartitions.com/art001.html
+                // https://www.mrbluyee.com/2024/03/28/huffman-coding-in-deflate/
+                // ripped this from zlib, move a higher level leaf down one and move two overflows up to the same level, we maintain kraft = 1
+                for (size_t bits = 15; bits > max_bit_length; bits--) {
+                    while(code_lens[bits].size() > 0) {
+                        // get the longest code which can be moved down
+                        size_t tbits = max_bit_length - 1;
+                        while (code_lens[tbits].size() == 0) tbits--;
+                        PreMember* p = code_lens[tbits].front();
+                        code_lens[tbits].pop();
+                        PreMember* p2 = code_lens[bits].front();
+                        code_lens[bits].pop();
+                        PreMember* p3 = code_lens[bits].front();
+                        code_lens[bits].pop();
+                        code_lens[tbits + 1].push(p);
+                        code_lens[tbits + 1].push(p2);
+                        code_lens[tbits + 1].push(p3);
+                    }
+                }
+                for (uint8_t i = 15; i >= 1; i--) {
+                    while (code_lens[i].size() > 0) {
+                        codes.push_back({0, i, 0, (uint16_t)code_lens[i].front()->p.value});
+                        code_lens[i].pop();
+                    }
+                }
+                // try fixing tree first
+                if (checkCodesOversubscribed(codes) != 1.0) {
+                    std::queue<Code*> re_lens[16] = {};
+                    for(auto& i : codes) {
+                        re_lens[i.len].push(&i);
+                    }
+                    for (size_t bits = 15; bits > 0 && checkCodesOversubscribed(codes) != 1.0; bits--) {
+                        while(re_lens[bits].size() > 0 && checkCodesOversubscribed(codes) != 1.0) {
+                            // get the longest code which can be moved down
+                            size_t tbits = max_bit_length - 1;
+                            while (re_lens[tbits].size() == 0) tbits--;
+                            Code* p = re_lens[tbits].front();
+                            re_lens[tbits].pop();
+                            Code* p2 = re_lens[bits].front();
+                            re_lens[bits].pop();
+                            Code* p3 = re_lens[bits].front();
+                            re_lens[bits].pop();
+                            p->len = tbits + 1;
+                            p2->len = tbits + 1;
+                            p3->len = tbits + 1;
+                            re_lens[tbits + 1].push(p);
+                            re_lens[tbits + 1].push(p2);
+                            re_lens[tbits + 1].push(p3);
+                        }
+                    }
+                    if (checkCodesOversubscribed(codes) != 1.0) {
+                        std::string str = "Code tree is over or under subscribed!" + std::to_string(checkCodesOversubscribed(codes));
+                        throw std::runtime_error(str.c_str());
+                    }
+                }
                 return codes;
             }
     };

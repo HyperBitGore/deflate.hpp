@@ -109,8 +109,8 @@ bool testDecompressionFile (std::string path) {
 int main () {
 
     std::cout << "Libdeflate test!\n";
-    // testDecompressionFile("test.bmp");
-    // testDecompressionFile("tiny.bmp");
+    //testDecompressionFile("test.bmp");
+    //testDecompressionFile("tiny.bmp");
     testDecompressionFile("large.bmp");
 
 

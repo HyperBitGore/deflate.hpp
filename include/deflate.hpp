@@ -49,7 +49,7 @@ private:
             }
             return 0;
         }
-        std::vector<Code> generateCodes (uint32_t max_length) {   
+        std::vector<Code> generateCodes (uint32_t max_bit_length) {   
             std::vector <PreCode> temp_codes;
             for (uint32_t i = 0; i < 300; i++) {
                 uint32_t occurs = getOccur(i);
@@ -57,11 +57,10 @@ private:
                     temp_codes.push_back({(int32_t)i, occurs});
                 }
             }
-            FlatHuffmanTree temp_f(temp_codes, max_length);
-            std::vector<Code> out_codes = temp_f.decode();
+            std::vector<Code> out_codes = FlatHuffmanTree::generateCodeLengths(temp_codes, max_bit_length);
             return out_codes;
         }
-        FlatHuffmanTree generateTree () {
+        FlatHuffmanTree generateTree (uint32_t max_bit_length) {
             std::vector <PreCode> temp_codes;
             for (uint32_t i = 0; i < 300; i++) {
                 uint32_t occurs = getOccur(i);
@@ -69,7 +68,9 @@ private:
                     temp_codes.push_back({(int32_t)i, occurs});
                 }
             }
-            return FlatHuffmanTree(temp_codes);
+            std::vector<Code> tree_codes = FlatHuffmanTree::generateCodeLengths(temp_codes, max_bit_length);
+            FlatHuffmanTree tree = FlatHuffmanTree(tree_codes);
+            return tree;
         }
     };
     class Bitstream {
@@ -185,13 +186,12 @@ private:
             }
         };
 
-        std::vector <uint8_t> buffer;
         std::vector <Match> matches;
         MatchHashmap mhash;
         size_t window_index;
 
         // match with zero length is an error
-        Match findLongestMatch () {
+        Match findLongestMatch (std::vector <uint8_t>& buffer) {
             size_t match_length = 3;
             Match m;
             for (int32_t i = window_index - 1; i < (int32_t)window_index && i > 0; i--) {
@@ -213,16 +213,12 @@ private:
         LZ77 (size_t size) {
             window_index = 0;
             mhash = MatchHashmap(size);
-            buffer.reserve(size);
         }
 
         std::vector<Match> getMatches (std::vector<uint8_t>& data) {
-            for (size_t i = 0; i < data.size(); i++) {
-                buffer.push_back(data[i]);
-            }
             std::vector<Match> matches;
-            while (window_index < buffer.size()) {
-                Match m = findLongestMatch();
+            while (window_index < data.size()) {
+                Match m = findLongestMatch(data);
                 if (m.length > 0 && mhash.addMatch(m)) {
                     matches.push_back(m);
                     window_index += m.length;
@@ -249,12 +245,12 @@ private:
         return bs;
     }
 
-    struct match_index_comp {
-        inline bool operator() (const Match& first, const Match& second) {
+    static struct {
+        bool operator()(Match first, Match second) const {
             return first.start < second.start;
         }
-    };
-
+    } match_index_comp;
+    // this is segfaulting on multi chunk files
     static std::pair<FlatHuffmanTree, FlatHuffmanTree> constructDynamicHuffmanTree (std::vector<uint8_t>& buffer, std::vector<Match> matches) {
         CodeMap c_map;
         c_map.addOccur(256);
@@ -277,15 +273,10 @@ private:
                 c_map.addOccur(buffer[i]);
             }
         }
-        FlatHuffmanTree tree = c_map.generateTree();
-        FlatHuffmanTree dist_tree = dist_codes.generateTree();
+        FlatHuffmanTree tree = c_map.generateTree(15);
+        FlatHuffmanTree dist_tree = dist_codes.generateTree(15);
         return std::pair<FlatHuffmanTree, FlatHuffmanTree> (tree, dist_tree);
     }
-    struct compare_code_value {
-        inline bool operator() (const Code& code1, const Code& code2) {
-            return code1.value < code2.value;
-        }
-    };
     static uint32_t countRepeats (std::vector<uint8_t>& bytes, uint32_t index) {
         uint32_t count = 0;
         for (uint32_t i = index + 1; i < bytes.size(); i++) {
@@ -346,7 +337,12 @@ private:
         return FlatHuffmanTree(codes);
     }
     static void writeDynamicHuffmanBytes (std::vector<Code> t_codes, std::vector<uint8_t>& bytes, size_t max) {
-        std::sort(t_codes.begin(), t_codes.end(), compare_code_value());
+        struct {
+            inline bool operator() (const Code& code1, const Code& code2) {
+                return code1.value < code2.value;
+            }
+        } compare_code_value;
+        std::sort(t_codes.begin(), t_codes.end(), compare_code_value);
         for (uint32_t i = 0; i < max; i++) {
             bool write = false;
             for (auto& j : t_codes) {
@@ -574,7 +570,7 @@ public:
                 LZ77 lz(KB32);
                 // finding the matches above length of 2
                 std::vector<Match> matches = lz.getMatches(buffer);
-                std::sort(matches.begin(), matches.end(), match_index_comp());
+                std::sort(matches.begin(), matches.end(), match_index_comp);
 
                 std::vector<uint8_t> output_buffer;
                 std::pair<FlatHuffmanTree, FlatHuffmanTree> trees = constructDynamicHuffmanTree(buffer, matches);
@@ -621,7 +617,7 @@ public:
             LZ77 lz(KB32);
             // finding the matches above length of 2
             std::vector<Match> matches = lz.getMatches(buffer);
-            std::sort(matches.begin(), matches.end(), match_index_comp());
+            std::sort(matches.begin(), matches.end(), match_index_comp);
 
             std::vector<uint8_t> output_buffer;
             std::pair<FlatHuffmanTree, FlatHuffmanTree> trees = constructDynamicHuffmanTree(buffer, matches);
@@ -629,7 +625,7 @@ public:
             Bitstream bs_fixed = compressBuffer(buffer, matches, fixed_huffman, fixed_dist_huffman, 0b010, q);
             Bitstream bs_dynamic = compressBuffer(buffer, matches, trees.first, trees.second, 0b100, q);
             Bitstream bs_out;
-            if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() < bs_dynamic.getSize()) {
+            if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() <= bs_dynamic.getSize()) {
                 bs_out = bs_fixed;
             } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
                 bs_out = bs_dynamic;
