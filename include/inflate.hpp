@@ -179,11 +179,11 @@ class inflate : deflate_compressor {
                     break;
                     default:
                         codes.push_back({0, cc.value, 0, (uint16_t)i});
+                        last_code = cc;
                         i++;
                 }
                 code = 0;
                 cur_bit = 0;
-                last_code = cc;
             }
         }
         return codes;
@@ -206,9 +206,8 @@ class inflate : deflate_compressor {
         FlatHuffmanTree disttree = FlatHuffmanTree(distcodes);
         return std::pair<FlatHuffmanTree, FlatHuffmanTree>(littree, disttree);
     }
-
-    static std::vector<uint8_t> decompressHuffmanBlock (Bitwrapper& data, FlatHuffmanTree tree, FlatHuffmanTree dist_tree) {
-        std::vector<uint8_t> buffer;
+    // https://stackoverflow.com/questions/62827971/can-deflate-only-compress-duplicate-strings-up-to-32-kib-apart
+    static void decompressHuffmanBlock (Bitwrapper& data, std::vector<uint8_t>& buffer, FlatHuffmanTree tree, FlatHuffmanTree dist_tree) {
         uint32_t code = 0;
         uint8_t cur_bit = 0;
         RangeLookup rl = generateLengthLookup();
@@ -257,8 +256,6 @@ class inflate : deflate_compressor {
             }
 
         }
-
-        return buffer;
     }
     public:
 
@@ -274,10 +271,10 @@ class inflate : deflate_compressor {
         
         uint32_t it = 0;
         uint32_t ot = 0;
+        std::vector<uint8_t> buffer;
         while (true) {
             uint8_t final = dat.readBits(1);
             uint8_t type = dat.readBits(2);
-            std::vector<uint8_t> buffer;
             FlatHuffmanTree used_tree = fixed_huffman;
             FlatHuffmanTree used_dist = fixed_dist_huffman;
             switch (type) {
@@ -300,18 +297,18 @@ class inflate : deflate_compressor {
                         used_dist = trees.second;
                     }
                 case 1:
-                    buffer = decompressHuffmanBlock(dat, used_tree, used_dist);
+                    decompressHuffmanBlock(dat, buffer, used_tree, used_dist);
                 break;
-            }
-            for (auto& i : buffer) {
-                out_data[ot++] = i;
             }
             if (final) {
                 break;
             }
-            else if (ot >= out_size || it >= in_size) {
+            else if (buffer.size() >= out_size || it >= in_size) {
                 return 0;
             }
+        }
+        for (auto& i : buffer) {
+            out_data[ot++] = i;
         }
         return ot;
     }

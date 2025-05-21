@@ -32,6 +32,7 @@ bool sameData (File* f1, File* f2) {
     }
     for (size_t i = 0; i < f1->size; i++) {
         if (f1->data[i] != f2->data[i]) {
+            std::cout << "failed at index " << i << "\n";
             return false;
         }
     }
@@ -108,9 +109,9 @@ bool testDecompressionFile (std::string path) {
 int main () {
 
     std::cout << "Libdeflate test!\n";
-    testDecompressionFile("test.bmp");
-    testDecompressionFile("tiny.bmp");
-    // testDecompressionFile("tmp.7z");
+    // testDecompressionFile("test.bmp");
+    // testDecompressionFile("tiny.bmp");
+    testDecompressionFile("large.bmp");
 
 
     return 0;

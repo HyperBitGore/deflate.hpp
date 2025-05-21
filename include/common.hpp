@@ -11,6 +11,7 @@
 #include <fstream>
 
 // deflate
+//  -fix multi chunk files breaking
 //  -add file version
 //  -add error checking and maybe test files lol
 //  -optimize
@@ -18,7 +19,7 @@
 // inflate
 //  -add file version
 //  -optimize code reading, make one function in bitwrapper???
-//  -reduce cycles by reading larger blocks of bits?? min length of bits for tree???
+//      -reduce cycles by reading larger blocks of bits?? min length of bits for tree???
 
 class deflate_compressor {
     protected:
