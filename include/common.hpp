@@ -13,7 +13,7 @@
 
 // deflate
 //  -fix multi chunk files breaking
-//      -probably just catch oversubscribed error and just write a fixed block
+//      -think it's how im writing the dynamic huffman trees out, examine why the output tree read is different than actual input
 //  -add file version
 //  -add error checking and maybe test files lol
 //  -optimize
@@ -357,11 +357,20 @@ class deflate_compressor {
                         code_lens[tbits].pop();
                         PreMember* p2 = code_lens[bits].front();
                         code_lens[bits].pop();
-                        PreMember* p3 = code_lens[bits].front();
-                        code_lens[bits].pop();
+                        bool second = false;
+                        PreMember* p3;
+                        if (code_lens[bits].size() > 0) {
+                            p3 = code_lens[bits].front();
+                            code_lens[bits].pop();
+                            second = true;
+                        }
                         code_lens[tbits + 1].push(p);
                         code_lens[tbits + 1].push(p2);
-                        code_lens[tbits + 1].push(p3);
+                        if (second) {
+                            code_lens[tbits + 1].push(p3);
+                        } else {
+                            std::cout << "not enough for two!\n";
+                        }
                     }
                 }
                 for (uint8_t i = 15; i >= 1; i--) {
@@ -372,7 +381,7 @@ class deflate_compressor {
                 }
                 // try fixing tree first
                 if (checkCodesOversubscribed(codes) != 1.0) {
-                    std::queue<Code*> re_lens[16] = {};
+                    /*std::queue<Code*> re_lens[16] = {};
                     for(auto& i : codes) {
                         re_lens[i.len].push(&i);
                     }
@@ -394,11 +403,11 @@ class deflate_compressor {
                             re_lens[tbits + 1].push(p2);
                             re_lens[tbits + 1].push(p3);
                         }
-                    }
-                    if (checkCodesOversubscribed(codes) != 1.0) {
-                        std::string str = "Code tree is over or under subscribed!" + std::to_string(checkCodesOversubscribed(codes));
-                        throw std::runtime_error(str.c_str());
-                    }
+                    }*/
+                    //if (checkCodesOversubscribed(codes) != 1.0) {
+                    std::string str = "Code tree is over or under subscribed!" + std::to_string(checkCodesOversubscribed(codes));
+                    throw std::runtime_error(str.c_str());
+                    //}
                 }
                 return codes;
             }

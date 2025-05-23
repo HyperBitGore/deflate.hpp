@@ -198,7 +198,7 @@ private:
                 if (buffer[i] == buffer[window_index]) {
                     size_t j = 1;
                     size_t k = i+1;
-                    for (; k < buffer.size() && window_index+j < buffer.size() && buffer[k] == buffer[window_index+j]; k++, j++);
+                    for (; k < buffer.size() && window_index+j < buffer.size() && buffer[k] == buffer[window_index+j] && j < 258; k++, j++);
                     if (j >= match_length) {
                         match_length = j;
                         m = Match((uint16_t)window_index-i, (uint16_t)j, (uint16_t)window_index);
@@ -240,7 +240,7 @@ private:
         bs.addBits(pre, 3);
         bs.nextByteBoundary();
         bs.addBits(buffer.size(), 16);
-        bs.addBits(~(buffer.size()), 16);
+        bs.addBits(~(buffer.size() & 0xFFFF), 16);
         bs.addRawBuffer(buffer);
         return bs;
     }
@@ -535,6 +535,7 @@ private:
         }
         Code endcode = tree.getCodeValue(256);
         bs.addBits(flipBits(endcode.code, endcode.len), endcode.len);
+        // bs.nextByteBoundaryConditional();
         return bs;
     }
 public:
@@ -620,14 +621,28 @@ public:
             std::sort(matches.begin(), matches.end(), match_index_comp);
 
             std::vector<uint8_t> output_buffer;
-            std::pair<FlatHuffmanTree, FlatHuffmanTree> trees = constructDynamicHuffmanTree(buffer, matches);
-
+            std::pair<FlatHuffmanTree, FlatHuffmanTree> trees;
+            bool set_fixed = false;
+            try {
+                trees = constructDynamicHuffmanTree(buffer, matches);
+            } catch (std::runtime_error e) {
+                std::cout << "Dynamic tree oversubscribed!\n";
+                set_fixed = true;
+            }
+            Bitstream bs_dynamic;
             Bitstream bs_fixed = compressBuffer(buffer, matches, fixed_huffman, fixed_dist_huffman, 0b010, q);
-            Bitstream bs_dynamic = compressBuffer(buffer, matches, trees.first, trees.second, 0b100, q);
+            if (!set_fixed) {
+                try {
+                    bs_dynamic = compressBuffer(buffer, matches, trees.first, trees.second, 0b100, q);
+                } catch (std::runtime_error e) {
+                    std::cout << "Dynamic tree oversubscribed!\n";
+                    set_fixed = true;
+                }
+            }
             Bitstream bs_out;
             if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() <= bs_dynamic.getSize()) {
                 bs_out = bs_fixed;
-            } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
+            } else if (!set_fixed && bs_dynamic.getSize() < (buffer.size() + 5)) {
                 bs_out = bs_dynamic;
             } else {
                 bs_out = makeUncompressedBlock(buffer, q);
