@@ -310,6 +310,7 @@ private:
                         i += (reps <= 138) ? reps + 1 : 138;
                     }
                 } else {
+                    cm.addOccur(bytes[i]);
                     cm.addOccur(16);
                     i += (reps <= 6) ? reps + 1 : 6;
                 }
@@ -384,12 +385,12 @@ private:
                 if (bytes[i] == 0) {
                     if (reps <= 10) {
                         reps_code = 17;
-                        inc += (reps < 10) ? reps : 10;
-                        real_reps = (reps < 10) ? reps : 10;
+                        inc += (reps < 10) ? reps + 1 : 10;
+                        real_reps = (reps < 10) ? reps + 1 : 10;
                     } else {
                         reps_code = 18;
-                        inc += (reps < 138) ? reps : 138;
-                        real_reps = (reps < 138) ? reps : 138;
+                        inc += (reps < 138) ? reps + 1 : 138;
+                        real_reps = (reps < 138) ? reps + 1 : 138;
                     }
                 } else {
                     reps_code = 16;
