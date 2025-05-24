@@ -14,6 +14,7 @@
 // deflate
 //  -fix multi chunk files breaking
 //      -think it's how im writing the dynamic huffman trees out, examine why the output tree read is different than actual input
+//      -its the unfinished byte from copying output, lets just use a big bitstream!!
 //  -add file version
 //  -add error checking and maybe test files lol
 //  -optimize

@@ -140,6 +140,14 @@ private:
                 }
                 return data.size();
             }
+            void copyBitstream(const Bitstream& bs) {
+                for(size_t i = 0; i < bs.offset; i++) {
+                    addBits(bs.data[i], 8);
+                }
+                if (bs.bit_offset > 0) {
+                    addBits(bs.data[bs.offset], bs.bit_offset);
+                }
+            }
     };
 
     struct Match {
@@ -605,8 +613,8 @@ public:
         bool q = false;
         std::vector<uint8_t> buffer;
         size_t index = 0;
-        size_t out_index = 0;
-        std::vector<uint8_t> out_data;
+        Bitstream out_stream;
+        size_t block = 0;
          while (!q) {
             for (; index < data_size && buffer.size() < KB32; index++) {
                 buffer.push_back(data[index]);
@@ -620,7 +628,6 @@ public:
             std::vector<Match> matches = lz.getMatches(buffer);
             std::sort(matches.begin(), matches.end(), match_index_comp);
 
-            std::vector<uint8_t> output_buffer;
             std::pair<FlatHuffmanTree, FlatHuffmanTree> trees;
             bool set_fixed = false;
             try {
@@ -648,13 +655,11 @@ public:
                 bs_out = makeUncompressedBlock(buffer, q);
             }
             // compare size of bs
-            output_buffer = bs_out.getData();
-            for (int32_t i = 0; i < (int32_t)bs_out.getSize(); i++) {
-                out_data.push_back(output_buffer[i]);
-                out_index++;
-            }
+            out_stream.copyBitstream(bs_out);
             buffer.clear();
+            block++;
+            std::cout << block << "\n";
         }
-        return out_data;
+        return out_stream.getData();
     }
 };
