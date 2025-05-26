@@ -239,18 +239,16 @@ private:
 
     };
     
-    static Bitstream makeUncompressedBlock (std::vector<uint8_t>& buffer, bool final) {
-        Bitstream bs;
+    static void makeUncompressedBlock (Bitstream& bs, std::vector<uint8_t>& buffer, bool final) {
         uint8_t pre = 0b000;
         if (final) {
             pre |= 1;
         }
         bs.addBits(pre, 3);
-        bs.nextByteBoundary();
+        bs.nextByteBoundaryConditional();
         bs.addBits(buffer.size(), 16);
-        bs.addBits(~(buffer.size() & 0xFFFF), 16);
+        bs.addBits(~(buffer.size()), 16);
         bs.addRawBuffer(buffer);
-        return bs;
     }
 
     static struct {
@@ -592,7 +590,7 @@ public:
                 } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
                     output_buffer = bs_dynamic.getData();
                 } else {
-                    output_buffer = makeUncompressedBlock(buffer, q).getData();
+                    // output_buffer = makeUncompressedBlock(buffer, q).getData();
                 }
                 // compare size of bs
                 for (auto& i : output_buffer) {
@@ -647,19 +645,17 @@ public:
                     set_fixed = true;
                 }
             }
-            Bitstream bs_out;
             if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() <= bs_dynamic.getSize()) {
-                bs_out = bs_fixed;
+                out_stream.copyBitstream(bs_fixed);
             } else if (!set_fixed && bs_dynamic.getSize() < (buffer.size() + 5)) {
-                bs_out = bs_dynamic;
+                out_stream.copyBitstream(bs_dynamic);
             } else {
-                bs_out = makeUncompressedBlock(buffer, q);
+                makeUncompressedBlock(out_stream, buffer, q);
             }
             // compare size of bs
-            out_stream.copyBitstream(bs_out);
             buffer.clear();
             block++;
-            std::cout << block << "\n";
+            // std::cout << block << "\n";
         }
         return out_stream.getData();
     }

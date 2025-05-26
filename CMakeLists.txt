@@ -12,11 +12,11 @@ if (CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(STATUS "Debug build detected: enabling AddressSanitizer")
 
     # Add AddressSanitizer flags for Debug
-    set(ASAN_FLAGS "-fsanitize=address")
+    #set(ASAN_FLAGS "-fsanitize=address")
 
     # Apply to CXX and C compilers
-    add_compile_options(${ASAN_FLAGS})
-    add_link_options(${ASAN_FLAGS})
+    #add_compile_options(${ASAN_FLAGS})
+    #add_link_options(${ASAN_FLAGS})
 endif()
 
 add_executable(deflate include/deflate.hpp include/common.hpp include/inflate.hpp test/example.cpp)

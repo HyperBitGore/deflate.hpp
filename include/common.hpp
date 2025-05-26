@@ -170,7 +170,7 @@ class deflate_compressor {
             }
             
             static constexpr double round1Up(double val) {
-                if (std::abs(1.0 - val) < 1e-4) {
+                if (val <= 1.0 && std::abs(1.0 - val) < 1e-4) {
                     return 1.0;
                 }
                 return val;
