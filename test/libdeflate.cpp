@@ -105,13 +105,30 @@ bool testDecompressionFile (std::string path) {
     return true;
 }
 
+void testDeflateSpeed(std::string path, size_t n) {
+    File file = readFile(path);
+    double total = 0;
+    for (size_t i = 0; i < n; i++) {
+        auto start = std::chrono::high_resolution_clock::now();
+        
+        std::vector<uint8_t> out_data_hpp = deflate::compress(file.data, file.size);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+        total += elapsed.count();
+        std::cout << "hppdeflate execution time: " << elapsed.count() << " ms\n";
+    }
+    std::cout << "Average: " << (total / n) << "\n";
+}
 
 int main () {
 
     std::cout << "Libdeflate test!\n";
-    testDecompressionFile("test.bmp");
-    testDecompressionFile("tiny.bmp");
-    testDecompressionFile("large.bmp");
+    testDeflateSpeed("test.bmp", 3);
+    //testDeflateSpeed("large.bmp", 1);
+    //testDecompressionFile("test.bmp");
+    //testDecompressionFile("tiny.bmp");
+    //testDecompressionFile("large.bmp");
 
 
     return 0;

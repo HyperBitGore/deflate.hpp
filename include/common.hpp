@@ -12,12 +12,12 @@
 #include <fstream>
 
 // deflate
-//  -fix multi chunk files breaking
-//      -think it's how im writing the dynamic huffman trees out, examine why the output tree read is different than actual input
-//      -its the unfinished byte from copying output, lets just use a big bitstream!!
 //  -add file version
 //  -add error checking and maybe test files lol
 //  -optimize
+//      -check if would be smaller to make new block or keep current block?
+//      -make matches chain again (it's why the deflate size is larger than before)
+//      -optimize matching function further as well
 
 // inflate
 //  -add file version
@@ -310,7 +310,6 @@ class deflate_compressor {
                 };
                 std::priority_queue<PreMember, std::vector<PreMember>, Compare> pq;
                 for (auto& i : precodes) {
-                    // std::cout << i.value << " : " << i.occurs << "\n";
                     pq.push({{i.value, i.occurs}, -1, -1});
                 }
                 // combine the two least frequent till we have nothing left
@@ -369,8 +368,6 @@ class deflate_compressor {
                         code_lens[tbits + 1].push(p2);
                         if (second) {
                             code_lens[tbits + 1].push(p3);
-                        } else {
-                            std::cout << "not enough for two!\n";
                         }
                     }
                 }

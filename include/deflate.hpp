@@ -7,6 +7,9 @@
 #define MAX_DIST_CODE_LEN 15
 #define MAX_PRE_CODE_LEN 7
 #define KB32 32768
+#define CHAR_BITS 0b111111111
+#define LENGTH_BITS 0b11111000000000
+#define DISTANCE_BITS 0b11111111111111111100000000000000
 
 // so reading huffman codes we read left to right versus regular data which is the basic right to left bit read
 // https://www.rfc-editor.org/rfc/rfc1951#page-6
@@ -134,6 +137,11 @@ private:
                     addBits(i, 8);
                 }
             }
+            void addRawBuffer (uint8_t buffer[], size_t n) {
+                for (size_t i = 0; i < n; i++) {
+                    addBits(buffer[i], 8);
+                }
+            }
             size_t getSize () {
                 if (bit_offset == 0) {
                     return data.size() - 1;
@@ -171,84 +179,62 @@ private:
     //https://en.wikipedia.org/wiki/LZ77_and_LZ78
     class LZ77 {
         private:
-        class MatchHashmap {
-            private: 
-            std::vector<Match> matches;
-            public:
-            MatchHashmap () {
-            }
-            MatchHashmap (size_t size) {
-                matches.reserve(size);
-                for (size_t i = 0; i < size; i++) {
-                    matches.push_back(Match());
-                }
-            }
-
-            bool addMatch (Match m) {
-                size_t index = m.start;
-                if (matches[index].length < m.length) {
-                    matches[index] = m;
-                    return true;
-                }
-                return false;
-            }
-        };
-
-        std::vector <Match> matches;
-        MatchHashmap mhash;
         size_t window_index;
-
-        // match with zero length is an error
-        Match findLongestMatch (std::vector <uint8_t>& buffer) {
-            size_t match_length = 3;
-            Match m;
-            for (int32_t i = window_index - 1; i < (int32_t)window_index && i > 0; i--) {
-                if (buffer[i] == buffer[window_index]) {
-                    size_t j = 1;
-                    size_t k = i+1;
-                    for (; k < buffer.size() && window_index+j < buffer.size() && buffer[k] == buffer[window_index+j] && j < 258; k++, j++);
-                    if (j >= match_length) {
-                        match_length = j;
-                        m = Match((uint16_t)window_index-i, (uint16_t)j, (uint16_t)window_index);
-                    }
-                }
-            }
-            return m;
-        }
 
         public:
 
         LZ77 (size_t size) {
             window_index = 0;
-            mhash = MatchHashmap(size);
         }
-
-        std::vector<Match> getMatches (std::vector<uint8_t>& data) {
-            std::vector<Match> matches;
-            while (window_index < data.size()) {
-                Match m = findLongestMatch(data);
-                if (m.length > 0 && mhash.addMatch(m)) {
-                    matches.push_back(m);
-                    window_index += m.length;
+        // modifies the read_buffer to contain matches lol
+        void getMatches (uint32_t read_buffer[], size_t read_buffer_index, RangeLookup& rl, RangeLookup& dl) {
+            const size_t size = read_buffer_index;
+            while (window_index < size) {
+                size_t match_length = 2;
+                for (int32_t i = window_index - 1; i < (int32_t)window_index && i > 0; i--) {
+                    uint8_t c = read_buffer[i] & CHAR_BITS;
+                    uint8_t w = read_buffer[window_index] & CHAR_BITS;
+                    if (c == w) {
+                        size_t j = 1;
+                        size_t k = i+1;
+                        for (; k < size && window_index+j < size && (read_buffer[k] & CHAR_BITS) == (read_buffer[window_index+j] & CHAR_BITS) && j < 258; k++, j++);
+                        if (j >= match_length && j > 2) {
+                            match_length = j;
+                            // need to write out char again, 9 bits for lit/length
+                            // need to write length extra bits if needed, 5 bits for extra length data
+                            // need to write distance value in remaining 18 bits
+                            Range r = rl.lookup(j);
+                            read_buffer[window_index] = r.code;
+                            if (r.extra_bits) {
+                                uint32_t o = j - r.start;
+                                read_buffer[window_index] |= (o << 9);
+                                uint32_t op = read_buffer[window_index] & LENGTH_BITS;
+                            }
+                            uint32_t off = window_index-i;
+                            read_buffer[window_index] |= (off << 14);
+                        }
+                    }
+                }
+                if (match_length > 2) {
+                    window_index += match_length;
                 } else {
                     window_index++;
                 }
             }
-            return matches;
         }
 
     };
     
-    static void makeUncompressedBlock (Bitstream& bs, std::vector<uint8_t>& buffer, bool final) {
+    static void makeUncompressedBlock (Bitstream& bs, uint8_t read_buffer[], size_t read_buffer_index, bool final) {
         uint8_t pre = 0b000;
         if (final) {
             pre |= 1;
         }
         bs.addBits(pre, 3);
         bs.nextByteBoundaryConditional();
-        bs.addBits(buffer.size(), 16);
-        bs.addBits(~(buffer.size()), 16);
-        bs.addRawBuffer(buffer);
+        bs.addBits(read_buffer_index, 16);
+        bs.addBits(~(read_buffer_index), 16);
+        bs.addRawBuffer(read_buffer, read_buffer_index);
     }
 
     static struct {
@@ -257,26 +243,17 @@ private:
         }
     } match_index_comp;
     // this is segfaulting on multi chunk files
-    static std::pair<FlatHuffmanTree, FlatHuffmanTree> constructDynamicHuffmanTree (std::vector<uint8_t>& buffer, std::vector<Match> matches) {
+    static std::pair<FlatHuffmanTree, FlatHuffmanTree> constructDynamicHuffmanTree (uint32_t read_buffer[], size_t read_buffer_index, RangeLookup& rl, RangeLookup& dl) {
         CodeMap c_map;
         c_map.addOccur(256);
         CodeMap dist_codes;
-        RangeLookup rl = generateLengthLookup();
-        RangeLookup dl = generateDistanceLookup();
-        for (uint32_t i = 0; i < buffer.size(); i++) {
-            if (matches.size() > 0 && i == matches[0].start) {
-                size_t c = 0;
-                for (size_t j = 0; j < matches.size() && matches[j].start == matches[0].start; j++, c++) {
-                    Range lookup = rl.lookup(matches[j].length);
-                    Range dist = dl.lookup(matches[j].offset);
-                    c_map.addOccur(lookup.code);
-                    dist_codes.addOccur(dist.code);
-                }
-                for (size_t j = 0; j < c; j++) {
-                    matches.erase(matches.begin());   
-                }
-            } else {
-                c_map.addOccur(buffer[i]);
+        for (uint32_t i = 0; i < read_buffer_index; i++) {
+            uint32_t car = (read_buffer[i] & CHAR_BITS);
+            uint32_t dist = (read_buffer[i] & DISTANCE_BITS) >> 14;
+            c_map.addOccur(car);
+            if (dist > 0) {
+                Range dran = dl.lookup(dist);
+                dist_codes.addOccur(dran.code);
             }
         }
         FlatHuffmanTree tree = c_map.generateTree(15);
@@ -374,7 +351,6 @@ private:
             if (bytes[i] != 0 || (reps <= 2 && bytes[i] == 0)) {
                 c = code_tree.getCodeValue(bytes[i]);
                 bs.addBits(flipBits(c.code, c.len), c.len);
-                // std::cout << "writing " << (uint32_t)bytes[i] << "\n";
                 inc = 1;
             }
             if (reps > 2) {
@@ -395,7 +371,6 @@ private:
                     inc += (reps < 6) ? reps : 6;
                     real_reps = (reps < 6) ? reps : 6;
                 }
-                // std::cout << "Repeating " << (uint32_t)bytes[i] << "," << real_reps << " times\n";
                 c = code_tree.getCodeValue(reps_code);
                 bs.addBits(flipBits(c.code, c.len), c.len);
                 if (c.extra_bits > 0) {
@@ -408,22 +383,18 @@ private:
                 }
             }
             i += inc;
-            // std::cout << "current i: " << i << "\n";
         }
     }
-    static void writeDynamicHuffmanTree (Bitstream& bs, std::vector<Match>& matches, FlatHuffmanTree tree, FlatHuffmanTree dist_tree, RangeLookup rl, RangeLookup dl) {
+    static void writeDynamicHuffmanTree (Bitstream& bs, FlatHuffmanTree tree, FlatHuffmanTree dist_tree, RangeLookup rl, RangeLookup dl) {
         // calculating how much above 257 to go for matches
-        uint32_t matches_size = 0;
-        if (matches.size() > 0) {
-            matches_size = matches[0].length;
-            for (auto& i : matches) {
-                if (i.length > matches_size) {
-                    matches_size = i.length;
-                }
+        std::vector<Code> huff_codes = tree.decode();
+        uint32_t matches_size = 257;
+        for (size_t i = 0; i < huff_codes.size(); i++) {
+            if (huff_codes[i].value > matches_size) {
+                matches_size = huff_codes[i].value;
             }
-            Range range = rl.lookup(matches_size);
-            matches_size = range.code - 257 + 1;
         }
+        matches_size = matches_size - 257 + 1;
         // HLIT
         bs.addBits(matches_size, 5);
 
@@ -464,7 +435,6 @@ private:
         };
         std::vector<uint8_t> bytes;
         std::vector<uint8_t> huff_bytes;
-        std::vector<Code> huff_codes = tree.decode();
         // constructing raw bytes of the table
         writeDynamicHuffmanBytes(huff_codes, huff_bytes, 257 + matches_size);
         std::vector<uint8_t> dist_bytes;
@@ -502,53 +472,53 @@ private:
 
     // deflate
 
-    static Bitstream compressBuffer (std::vector<uint8_t>& buffer, std::vector<Match> matches, FlatHuffmanTree tree, FlatHuffmanTree dist_tree, uint32_t preamble, bool final) {
+    static Bitstream compressBuffer (uint32_t read_buffer[], size_t read_buffer_index, FlatHuffmanTree tree, FlatHuffmanTree dist_tree, uint32_t preamble, bool final, RangeLookup& rl, RangeLookup& dl) {
         // compress into huffman code format
         Bitstream bs;
-        RangeLookup rl = generateLengthLookup();
-        RangeLookup dl = generateDistanceLookup();
         // writing the block out to file
         uint32_t pre = (final) ? (preamble | 0b001) : preamble; 
         bs.addBits(pre, 3);
         if ((preamble & 0b100) == 4) {
-            writeDynamicHuffmanTree(bs, matches, tree, dist_tree, rl, dl);
+            writeDynamicHuffmanTree(bs, tree, dist_tree, rl, dl);
         }
-        for (uint32_t i = 0; i < buffer.size();) {
-            if (matches.size() > 0 && i == matches[0].start) {
-                // output the code for the thing
-                Range lookup = rl.lookup(matches[0].length);
-
-                Code c = tree.getCodeValue(lookup.code);
+        for (uint32_t i = 0; i < read_buffer_index;) {
+            uint32_t car = (read_buffer[i] & CHAR_BITS);
+            if (car > 256) {
+                // process length and distance pair
+                Range r_len = rl.findCode(car);
+                uint32_t len = r_len.start;
+                Code c = tree.getCodeValue(car);
                 bs.addBits(flipBits(c.code, c.len), c.len);
-                // add extra bits to bitstream
-                if (lookup.extra_bits > 0) {
-                    uint32_t extra_bits = matches[0].length % lookup.start;
-                    bs.addBits(extra_bits, lookup.extra_bits);
+                // add extra bits from the read_buffer
+                if (r_len.extra_bits > 0) {
+                    uint32_t extra_bits = (read_buffer[i] & LENGTH_BITS) >> 9;
+                    len += extra_bits;
+                    bs.addBits(extra_bits, r_len.extra_bits);
                 }
-                Range dist = dl.lookup(matches[0].offset);
-                Code dic = dist_tree.getCodeValue(dist.code);
-                bs.addBits(flipBits(dic.code, dic.len), dic.len);
-                if (dist.extra_bits > 0) {
-                    uint32_t extra_bits = matches[0].offset % dist.start;
-                    bs.addBits(extra_bits, dist.extra_bits);
+                // distance
+                uint32_t dist = (read_buffer[i] & DISTANCE_BITS) >> 14;
+                Range r_dist = dl.lookup(dist);
+                Code d_code = dist_tree.getCodeValue(r_dist.code);
+                bs.addBits(flipBits(d_code.code, d_code.len), d_code.len);
+                if (r_dist.extra_bits > 0) {
+                    uint32_t extra_bits = dist % r_dist.start;
+                    bs.addBits(extra_bits, r_dist.extra_bits);
                 }
-                i += matches[0].length;
-                matches.erase(matches.begin());
+                i += len;
             } else {
-                Code c = tree.getCodeValue((uint32_t)buffer[i]);
+                Code c = tree.getCodeValue(car);
                 bs.addBits(flipBits(c.code, c.len), c.len);
-                i++;
+                i++; 
             }
         }
         Code endcode = tree.getCodeValue(256);
         bs.addBits(flipBits(endcode.code, endcode.len), endcode.len);
-        // bs.nextByteBoundaryConditional();
         return bs;
     }
 public:
     // not done
     static size_t compress (std::string file_path, std::string new_file) {
-        std::streampos sp = getFileSize(file_path);
+       /* std::streampos sp = getFileSize(file_path);
         std::ifstream fi;
         fi.open(file_path, std::ios::binary);
         if (!fi) {
@@ -577,7 +547,7 @@ public:
                 }
                 LZ77 lz(KB32);
                 // finding the matches above length of 2
-                std::vector<Match> matches = lz.getMatches(buffer);
+                lz.getMatches(buffer);
                 std::sort(matches.begin(), matches.end(), match_index_comp);
 
                 std::vector<uint8_t> output_buffer;
@@ -602,21 +572,28 @@ public:
         }
 
         fi.close();
-        of.close();
-        return out_index;
+        of.close();*/
+        return 0;
     }
 
     static std::vector<uint8_t> compress (char* data, size_t data_size) {
         FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
         FlatHuffmanTree fixed_huffman(generateFixedCodes());
+        RangeLookup rl = generateLengthLookup();
+        RangeLookup dl = generateDistanceLookup();
         bool q = false;
-        std::vector<uint8_t> buffer;
         size_t index = 0;
         Bitstream out_stream;
         size_t block = 0;
+
+        size_t read_buffer_index = 0;
+        uint32_t read_buffer[131072];
+        uint8_t raw_buffer[32768];
+        std::memset(read_buffer, 0, 131072);
          while (!q) {
-            for (; index < data_size && buffer.size() < KB32; index++) {
-                buffer.push_back(data[index]);
+            for (; index < data_size && read_buffer_index < KB32; index++, read_buffer_index++) {
+                read_buffer[read_buffer_index] = ((uint32_t)data[index]) & 0xff;
+                raw_buffer[read_buffer_index] = data[index];
             }
             // writing the block out to file
             if (index >= data_size) {
@@ -624,36 +601,36 @@ public:
             }
             LZ77 lz(KB32);
             // finding the matches above length of 2
-            std::vector<Match> matches = lz.getMatches(buffer);
-            std::sort(matches.begin(), matches.end(), match_index_comp);
+            lz.getMatches(read_buffer, read_buffer_index, rl, dl);
 
             std::pair<FlatHuffmanTree, FlatHuffmanTree> trees;
             bool set_fixed = false;
             try {
-                trees = constructDynamicHuffmanTree(buffer, matches);
+                trees = constructDynamicHuffmanTree(read_buffer, read_buffer_index, rl, dl);
             } catch (std::runtime_error e) {
                 std::cout << "Dynamic tree oversubscribed!\n";
                 set_fixed = true;
             }
+            
             Bitstream bs_dynamic;
-            Bitstream bs_fixed = compressBuffer(buffer, matches, fixed_huffman, fixed_dist_huffman, 0b010, q);
+            Bitstream bs_fixed = compressBuffer(read_buffer, read_buffer_index, fixed_huffman, fixed_dist_huffman, 0b010, q, rl, dl);
             if (!set_fixed) {
                 try {
-                    bs_dynamic = compressBuffer(buffer, matches, trees.first, trees.second, 0b100, q);
+                    bs_dynamic = compressBuffer(read_buffer, read_buffer_index, trees.first, trees.second, 0b100, q, rl, dl);
                 } catch (std::runtime_error e) {
                     std::cout << "Dynamic tree oversubscribed!\n";
                     set_fixed = true;
                 }
             }
-            if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() <= bs_dynamic.getSize()) {
+            if (bs_fixed.getSize() < (read_buffer_index + 5) && (!set_fixed && bs_fixed.getSize() <= bs_dynamic.getSize())) {
                 out_stream.copyBitstream(bs_fixed);
-            } else if (!set_fixed && bs_dynamic.getSize() < (buffer.size() + 5)) {
+            } else if (!set_fixed && bs_dynamic.getSize() < (read_buffer_index + 5)) {
                 out_stream.copyBitstream(bs_dynamic);
             } else {
-                makeUncompressedBlock(out_stream, buffer, q);
+                makeUncompressedBlock(out_stream, raw_buffer, read_buffer_index, q);
             }
             // compare size of bs
-            buffer.clear();
+            read_buffer_index = 0;
             block++;
             // std::cout << block << "\n";
         }
