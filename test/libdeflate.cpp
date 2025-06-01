@@ -126,7 +126,7 @@ int main () {
     std::cout << "Libdeflate test!\n";
     testDeflateSpeed("test.bmp", 3);
     //testDeflateSpeed("large.bmp", 1);
-    //testDecompressionFile("test.bmp");
+    testDecompressionFile("test.bmp");
     //testDecompressionFile("tiny.bmp");
     //testDecompressionFile("large.bmp");
 

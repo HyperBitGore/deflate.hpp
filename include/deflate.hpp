@@ -158,22 +158,6 @@ private:
             }
     };
 
-    struct Match {
-            uint16_t offset; //offset backwards from match
-            uint16_t length; //length of match
-            uint16_t start;
-            Match () {
-                offset = 0;
-                length = 0;
-                start = 0;
-            }
-            Match (uint16_t offset, uint16_t length, uint16_t start) {
-                this->offset = offset;
-                this->length = length;
-                this->start = start;
-            }
-    };
-
     
     //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
     //https://en.wikipedia.org/wiki/LZ77_and_LZ78
@@ -191,7 +175,7 @@ private:
             const size_t size = read_buffer_index;
             while (window_index < size) {
                 size_t match_length = 2;
-                for (int32_t i = window_index - 1; i < (int32_t)window_index && i > 0; i--) {
+                for (int32_t i = window_index - 1; i < (int32_t)window_index && i > 0;) {
                     uint8_t c = read_buffer[i] & CHAR_BITS;
                     uint8_t w = read_buffer[window_index] & CHAR_BITS;
                     if (c == w) {
@@ -204,15 +188,15 @@ private:
                             // need to write length extra bits if needed, 5 bits for extra length data
                             // need to write distance value in remaining 18 bits
                             Range r = rl.lookup(j);
-                            read_buffer[window_index] = r.code;
-                            if (r.extra_bits) {
-                                uint32_t o = j - r.start;
-                                read_buffer[window_index] |= (o << 9);
-                                uint32_t op = read_buffer[window_index] & LENGTH_BITS;
-                            }
+                            uint32_t o = j - r.start;
                             uint32_t off = window_index-i;
-                            read_buffer[window_index] |= (off << 14);
+                            read_buffer[window_index] = (off << 14) | (o << 9) | (r.code & CHAR_BITS);
+                            i -= match_length;
+                        } else {
+                            i--;
                         }
+                    } else {
+                        i--;
                     }
                 }
                 if (match_length > 2) {
@@ -237,11 +221,6 @@ private:
         bs.addRawBuffer(read_buffer, read_buffer_index);
     }
 
-    static struct {
-        bool operator()(Match first, Match second) const {
-            return first.start < second.start;
-        }
-    } match_index_comp;
     // this is segfaulting on multi chunk files
     static std::pair<FlatHuffmanTree, FlatHuffmanTree> constructDynamicHuffmanTree (uint32_t read_buffer[], size_t read_buffer_index, RangeLookup& rl, RangeLookup& dl) {
         CodeMap c_map;
