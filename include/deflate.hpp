@@ -171,17 +171,17 @@ private:
             window_index = 0;
         }
         // modifies the read_buffer to contain matches lol
-        void getMatches (uint32_t read_buffer[], size_t read_buffer_index, RangeLookup& rl, RangeLookup& dl) {
+        void getMatches (uint32_t read_buffer[], uint8_t raw_buffer[], size_t read_buffer_index, RangeLookup& rl, RangeLookup& dl) {
             const size_t size = read_buffer_index;
             while (window_index < size) {
-                size_t match_length = 2;
-                for (int32_t i = window_index - 1; i < (int32_t)window_index && i > 0;) {
-                    uint8_t c = read_buffer[i] & CHAR_BITS;
-                    uint8_t w = read_buffer[window_index] & CHAR_BITS;
+                size_t match_length = 1;
+                for (int32_t i = window_index - 1; i > 0; i--) {
+                    uint32_t c = raw_buffer[i];
+                    uint32_t w = raw_buffer[window_index];
                     if (c == w) {
                         size_t j = 1;
                         size_t k = i+1;
-                        for (; k < size && window_index+j < size && (read_buffer[k] & CHAR_BITS) == (read_buffer[window_index+j] & CHAR_BITS) && j < 258; k++, j++);
+                        for (; k < size && window_index+j < size && (raw_buffer[k]) == (raw_buffer[window_index+j]) && j < 258; k++, j++);
                         if (j >= match_length && j > 2) {
                             match_length = j;
                             // need to write out char again, 9 bits for lit/length
@@ -191,19 +191,11 @@ private:
                             uint32_t o = j - r.start;
                             uint32_t off = window_index-i;
                             read_buffer[window_index] = (off << 14) | (o << 9) | (r.code & CHAR_BITS);
-                            i -= match_length;
-                        } else {
-                            i--;
+                            i -= match_length-1;
                         }
-                    } else {
-                        i--;
                     }
                 }
-                if (match_length > 2) {
-                    window_index += match_length;
-                } else {
-                    window_index++;
-                }
+                window_index += match_length;
             }
         }
 
@@ -580,7 +572,7 @@ public:
             }
             LZ77 lz(KB32);
             // finding the matches above length of 2
-            lz.getMatches(read_buffer, read_buffer_index, rl, dl);
+            lz.getMatches(read_buffer, raw_buffer, read_buffer_index, rl, dl);
 
             std::pair<FlatHuffmanTree, FlatHuffmanTree> trees;
             bool set_fixed = false;

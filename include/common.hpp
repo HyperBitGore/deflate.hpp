@@ -16,8 +16,7 @@
 //  -add error checking and maybe test files lol
 //  -optimize
 //      -check if would be smaller to make new block or keep current block?
-//      -make matches chain again (it's why the deflate size is larger than before)
-//      -optimize matching function further as well
+//      -optimize matching function further as well (utilize zlib method of three byte hashing)
 
 // inflate
 //  -add file version
