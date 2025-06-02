@@ -161,20 +161,41 @@ private:
     
     //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
     //https://en.wikipedia.org/wiki/LZ77_and_LZ78
+    // rolling hash time!
     class LZ77 {
         private:
         size_t window_index;
-
+        std::vector<uint32_t> map; // 9 bits for length, 16 for start??
+        uint32_t modulo_power(uint32_t base, uint32_t n, uint32_t modulo) {
+            uint32_t total = 1;
+            for (size_t i = 0; i < n; i++) {
+                total = (n * base) % modulo;
+            }
+            return total;
+        }
+        uint32_t hashFunc (uint8_t a, uint8_t b, uint8_t c, uint32_t start) {
+            uint32_t t = (a * modulo_power(256, start, 512)) + (b * modulo_power(256, start+1, 512))
+            + (c * modulo_power(256, start + 2, 512));
+            return t % 512;
+        }
         public:
 
         LZ77 (size_t size) {
-            window_index = 0;
+            window_index = 1;
+            for (size_t i = 0; i < size; i++) {
+                map.push_back(0);
+            }
         }
         // modifies the read_buffer to contain matches lol
+        //https://github.com/ebiggers/libdeflate/blob/master/lib/hc_matchfinder.h
+        // https://www.youtube.com/watch?v=BfUejqd07yo
         void getMatches (uint32_t read_buffer[], uint8_t raw_buffer[], size_t read_buffer_index, RangeLookup& rl, RangeLookup& dl) {
             const size_t size = read_buffer_index;
+            uint32_t* raw_32_buffer = (uint32_t*)raw_buffer;
             while (window_index < size) {
                 size_t match_length = 1;
+                uint32_t base = 256;
+                uint32_t hash = hashFunc(raw_buffer[window_index - 1], raw_buffer[window_index], raw_buffer[window_index + 1], window_index-1);
                 for (int32_t i = window_index - 1; i > 0; i--) {
                     uint32_t c = raw_buffer[i];
                     uint32_t w = raw_buffer[window_index];
@@ -555,7 +576,6 @@ public:
         bool q = false;
         size_t index = 0;
         Bitstream out_stream;
-        size_t block = 0;
 
         size_t read_buffer_index = 0;
         uint32_t read_buffer[131072];
@@ -600,10 +620,7 @@ public:
             } else {
                 makeUncompressedBlock(out_stream, raw_buffer, read_buffer_index, q);
             }
-            // compare size of bs
             read_buffer_index = 0;
-            block++;
-            // std::cout << block << "\n";
         }
         return out_stream.getData();
     }
