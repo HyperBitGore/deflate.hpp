@@ -86,9 +86,9 @@ bool testDecompressionFile (std::string path) {
     std::cout << "size of deflate.hpp for " << path << " : " << out_data_hpp.size() << "\n";
     //decompressing the data
     libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
-    File out_inflate_lib(file.size);
+    File out_inflate_lib(file.size*2);
     size_t out_lib_deflate = 0;
-    libdeflate_result result = libdeflate_deflate_decompress(decompressor, out_data_hpp.data(), out_data_hpp.size(), out_inflate_lib.data, file.size, &out_lib_deflate);
+    libdeflate_result result = libdeflate_deflate_decompress(decompressor, out_data_hpp.data(), out_data_hpp.size(), out_inflate_lib.data, file.size*2, &out_lib_deflate);
     std::cout << "size of libdeflate inflate for " << path << " : " << out_lib_deflate << "\n"; 
     if (result != LIBDEFLATE_SUCCESS) {
         return false;
@@ -125,10 +125,10 @@ int main () {
 
     std::cout << "Libdeflate test!\n";
     testDeflateSpeed("test.bmp", 3);
-    // testDeflateSpeed("large.bmp", 1);
+    testDeflateSpeed("large.bmp", 1);
     testDecompressionFile("test.bmp");
-    // testDecompressionFile("tiny.bmp");
-    //testDecompressionFile("large.bmp");
+    testDecompressionFile("tiny.bmp");
+    testDecompressionFile("large.bmp");
 
 
     return 0;

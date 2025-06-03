@@ -1,8 +1,11 @@
 #pragma once
 #include "common.hpp"
 #include <cstdint>
-#include <iostream>
 #include <utility>
+#ifdef DEBUG
+#include <iostream>
+#include <chrono>
+#endif
 #define MAX_LITLEN_CODE_LEN 15
 #define MAX_DIST_CODE_LEN 15
 #define MAX_PRE_CODE_LEN 7
@@ -161,63 +164,156 @@ private:
     
     //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
     //https://en.wikipedia.org/wiki/LZ77_and_LZ78
-    // rolling hash time!
+    // hash every four bytes
+    // insert hashes into big ass table
+    // when look in hash discover if pattern already seen
+    // if seen compare length, then match
     class LZ77 {
         private:
         size_t window_index;
-        std::vector<uint32_t> map; // 9 bits for length, 16 for start??
-        uint32_t modulo_power(uint32_t base, uint32_t n, uint32_t modulo) {
-            uint32_t total = 1;
-            for (size_t i = 0; i < n; i++) {
-                total = (n * base) % modulo;
-            }
-            return total;
+        struct member {
+            uint32_t data;  // 9 bits for length, 16 for start
+            int32_t next; // index of next member in bucket
+        };
+        std::vector<member> map; // 9 bits for length, 16 for start
+        inline uint32_t hashFunc (uint32_t n) {
+            // constant stolen from libdeflate :)
+            uint32_t t = (n * 0x1E35A7BD) >> (32 - 15);
+            return t;
         }
-        uint32_t hashFunc (uint8_t a, uint8_t b, uint8_t c, uint32_t start) {
-            uint32_t t = (a * modulo_power(256, start, 512)) + (b * modulo_power(256, start+1, 512))
-            + (c * modulo_power(256, start + 2, 512));
-            return t % 512;
+        inline uint32_t grabFourBytes (uint8_t buffer[], size_t size, size_t offset) {
+            int32_t n = ((int32_t)size - (int32_t)offset);
+            if (n <= 0) {
+                return 0;
+            }
+            else if (n >= 4) {
+                uint32_t out = (uint32_t)(buffer[offset]) | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16) | (buffer[offset + 3] << 24);
+                offset += 3;
+                return out;
+            } else {
+                uint32_t c = 0;
+                for (size_t i = 0; i < n; i++, offset++) {
+                    c |= (buffer[offset] << (i * 8));
+                }
+                return c;
+            }
+        }
+        void addHash (uint32_t length, uint32_t start, uint32_t hash) {
+            member m;
+            m.next = -1;
+            m.data = length & 0x1ff;
+            m.data |= (start << 9);
+            if (map[hash].data == 0) {
+                map[hash] = m;
+            } else {
+                size_t s = hash;
+                while(map[s].next != -1) {
+                    s = map[s].next;
+                }
+                map.push_back(m);
+                map[s].next = map.size() - 1;
+            }
+        }
+        inline bool hashMatch (uint32_t hash) {
+            if (map[hash].data != 0) {
+                return true;
+            }
+            return false;
         }
         public:
 
         LZ77 (size_t size) {
-            window_index = 1;
+            window_index = 2;
+            map.reserve(size);
             for (size_t i = 0; i < size; i++) {
-                map.push_back(0);
+                map.push_back({0, -1});
             }
         }
         // modifies the read_buffer to contain matches lol
         //https://github.com/ebiggers/libdeflate/blob/master/lib/hc_matchfinder.h
         // https://www.youtube.com/watch?v=BfUejqd07yo
+        // hash each three byte run
+        // check if hash in map, if in map loop through each hash comparing the bytes to current hash bytes
         void getMatches (uint32_t read_buffer[], uint8_t raw_buffer[], size_t read_buffer_index, RangeLookup& rl, RangeLookup& dl) {
             const size_t size = read_buffer_index;
-            uint32_t* raw_32_buffer = (uint32_t*)raw_buffer;
+            #ifdef DEBUG
+            auto start = std::chrono::high_resolution_clock::now();
+            #endif
+            size_t matches = 0;
+            size_t hashesAdded = 0;
             while (window_index < size) {
-                size_t match_length = 1;
-                uint32_t base = 256;
-                uint32_t hash = hashFunc(raw_buffer[window_index - 1], raw_buffer[window_index], raw_buffer[window_index + 1], window_index-1);
-                for (int32_t i = window_index - 1; i > 0; i--) {
-                    uint32_t c = raw_buffer[i];
-                    uint32_t w = raw_buffer[window_index];
-                    if (c == w) {
-                        size_t j = 1;
-                        size_t k = i+1;
-                        for (; k < size && window_index+j < size && (raw_buffer[k]) == (raw_buffer[window_index+j]) && j < 258; k++, j++);
-                        if (j >= match_length && j > 2) {
-                            match_length = j;
-                            // need to write out char again, 9 bits for lit/length
-                            // need to write length extra bits if needed, 5 bits for extra length data
-                            // need to write distance value in remaining 18 bits
-                            Range r = rl.lookup(j);
-                            uint32_t o = j - r.start;
-                            uint32_t off = window_index-i;
-                            read_buffer[window_index] = (off << 14) | (o << 9) | (r.code & CHAR_BITS);
-                            i -= match_length-1;
+                uint32_t bytes = grabFourBytes(raw_buffer, size, window_index);
+                uint32_t w = hashFunc(bytes);
+                if (hashMatch(w)) {
+                    int32_t h = w;
+                    while(map[h].next != -1 && grabFourBytes(raw_buffer, size, (map[h].data & 0xfffffe00) >> 9) != bytes) {
+                        h = map[h].next;
+                    }
+                    uint32_t start = (map[h].data & 0xfffffe00) >> 9;
+                    if (grabFourBytes(raw_buffer, size, start) == bytes) {
+                        matches++;
+                        // read four bytes until unequal
+                        // if unequal read drop a byte from last four bytes until same or out
+                        uint32_t off = window_index+4;
+                        uint32_t off2 = start+4;
+                        uint32_t j = 4;
+                        while(true) {
+                            uint32_t w2 = grabFourBytes(raw_buffer, size, off);
+                            uint32_t f = grabFourBytes(raw_buffer, size, off2);
+                            if (w2 != f || j >= 258) {
+                                // drop bytes from each till equal or not :)))
+                                int32_t i = 1;
+                                for (; i < 4 && w2 != f && j + i < size; i++) {
+                                    w2 = (w2 & (0xffffffff >> (i * 8)));
+                                    f = f & (0xffffffff >> (i * 8));
+                                }
+                                if (j >= 258) {
+                                    j = 258;
+                                    i = 4;
+                                }
+                                if (w2 == f && i != 4 && window_index + j + i < size) {
+                                    // need to write out char again, 9 bits for lit/length
+                                    // need to write length extra bits if needed, 5 bits for extra length data
+                                    // need to write distance value in remaining 18 bits
+                                    Range r = rl.lookup(j + i); // this will be length btw
+                                    uint32_t o = j + i - r.start;
+                                    uint32_t of = window_index-start;
+                                    uint32_t of_m = (of << 14);
+                                    // std::cout << "match: " << j + i << ", " << of << ", " << r.code << "\n";
+                                    // std::cout << "start: " << start << ", windowIndex:" << window_index << "\n";
+                                    read_buffer[window_index] = (of << 14) | (o << 9) | (r.code & CHAR_BITS);
+                                    break;
+                                } else {
+                                    Range r = rl.lookup(j); // this will be length btw
+                                    uint32_t o = (j) - r.start;
+                                    uint32_t of = window_index-start;
+                                    uint32_t of_m = (of << 14);
+                                    // std::cout << "match: " << j << ", " << of << ", " << r.code << "\n";
+                                    // std::cout << "start: " << start << ", windowIndex:" << window_index << "\n";
+                                    read_buffer[window_index] = (of << 14) | (o << 9) | (r.code & CHAR_BITS);
+                                    break;
+                                }
+                            } else {
+                                off += 4;
+                                off2 += 4;
+                                j += 4;
+                            }
                         }
                     }
+                } else {
+                    addHash(4, window_index, w);
+                    hashesAdded++;
                 }
-                window_index += match_length;
+
+                window_index+=4;
             }
+            #ifdef DEBUG
+            auto end = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double, std::milli> elapsed = end - start;
+            std::cout << "matches: " << matches << "\n";
+            std::cout << "hashes added: " << hashesAdded << "\n";
+            std::cout << "match execution time: " << elapsed.count() << " ms\n";
+            #endif
         }
 
     };
@@ -599,7 +695,9 @@ public:
             try {
                 trees = constructDynamicHuffmanTree(read_buffer, read_buffer_index, rl, dl);
             } catch (std::runtime_error e) {
+                #ifdef DEBUG
                 std::cout << "Dynamic tree oversubscribed!\n";
+                #endif
                 set_fixed = true;
             }
             
@@ -609,11 +707,13 @@ public:
                 try {
                     bs_dynamic = compressBuffer(read_buffer, read_buffer_index, trees.first, trees.second, 0b100, q, rl, dl);
                 } catch (std::runtime_error e) {
+                    #ifdef DEBUG
                     std::cout << "Dynamic tree oversubscribed!\n";
+                    #endif
                     set_fixed = true;
                 }
             }
-            if (bs_fixed.getSize() < (read_buffer_index + 5) && (!set_fixed && bs_fixed.getSize() <= bs_dynamic.getSize())) {
+            if ((bs_fixed.getSize() < (read_buffer_index + 5) && (bs_fixed.getSize() <= bs_dynamic.getSize())) || set_fixed) {
                 out_stream.copyBitstream(bs_fixed);
             } else if (!set_fixed && bs_dynamic.getSize() < (read_buffer_index + 5)) {
                 out_stream.copyBitstream(bs_dynamic);
