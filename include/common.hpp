@@ -16,11 +16,15 @@
 //  -add error checking and maybe test files lol
 //  -optimize
 //      -check if would be smaller to make new block or keep current block?
+//      -add string match chaining??
+//      -make addbits more efficient (grab chunks of bits rather than one at at time)
 
 // inflate
 //  -add file version
 //  -optimize code reading, make one function in bitwrapper???
 //      -reduce cycles by reading larger blocks of bits?? min length of bits for tree???
+
+//cleanup
 
 class deflate_compressor {
     protected:
@@ -64,6 +68,7 @@ class deflate_compressor {
                 int32_t right = -1;
             };
             std::vector<Member> members;
+            int32_t value_lookup_table[300];
             int32_t head = -1;
 
             void insert (Code c) {
@@ -98,6 +103,7 @@ class deflate_compressor {
                         members[memb].extra_bits = c.extra_bits;
                         members[memb].len = c.len;
                         members[memb].value = c.value;
+                        value_lookup_table[c.value] = memb;
                     }
                 }
             }
@@ -234,28 +240,38 @@ class deflate_compressor {
             }
 
             Member findMemberValue (uint32_t value) {
-                for (size_t i = 0; i < members.size(); i++) {
-                    if (members[i].len != -1 && members[i].value == value) {
-                        return members[i];
-                    }
+                int32_t index = value_lookup_table[value];
+                if (index != -1) {
+                    return members[index];
                 }
                 return {0, 0, -1};
             }
         public:
             FlatHuffmanTree() {
-
+                for(size_t i = 0; i < 300; i++) {
+                    value_lookup_table[i] = -1;
+                }
             }
             FlatHuffmanTree (std::vector<Code> codes){
+                for(size_t i = 0; i < 300; i++) {
+                    value_lookup_table[i] = -1;
+                }
                 construct(codes);
             }
             //copy constructor, not really, ptr is the same lol
             FlatHuffmanTree (const FlatHuffmanTree& huff) {
                 members = huff.members;
                 head = huff.head;
+                for (size_t i = 0; i < 300; i++) {
+                    value_lookup_table[i] = huff.value_lookup_table[i];
+                }
             }
             FlatHuffmanTree (FlatHuffmanTree& huff) {
                 members = huff.members;
                 head = huff.head;
+                for (size_t i = 0; i < 300; i++) {
+                    value_lookup_table[i] = huff.value_lookup_table[i];
+                }
             }
 
             Code getCodeEncoded (uint32_t code, int32_t len) {
@@ -298,7 +314,7 @@ class deflate_compressor {
                 return codes;
             }
             // https://github.com/ebiggers/libdeflate/blob/master/lib/deflate_compress.c
-            // //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
+            //      -https://brandougherty.github.io/blog/posts/implementing_deflate:_incomplete_and_oversubscribed_codes.html
             // The tree is built by repeatedly combining the two least frequent symbols or trees, assigning them longer codes as the process progresses.
             static std::vector<Code> generateCodeLengths (std::vector<PreCode> precodes, uint32_t max_bit_length) {
                 struct Compare {
@@ -377,33 +393,8 @@ class deflate_compressor {
                 }
                 // try fixing tree first
                 if (checkCodesOversubscribed(codes) != 1.0) {
-                    /*std::queue<Code*> re_lens[16] = {};
-                    for(auto& i : codes) {
-                        re_lens[i.len].push(&i);
-                    }
-                    for (size_t bits = 15; bits > 0 && checkCodesOversubscribed(codes) != 1.0; bits--) {
-                        while(re_lens[bits].size() > 0 && checkCodesOversubscribed(codes) != 1.0) {
-                            // get the longest code which can be moved down
-                            size_t tbits = max_bit_length - 1;
-                            while (re_lens[tbits].size() == 0) tbits--;
-                            Code* p = re_lens[tbits].front();
-                            re_lens[tbits].pop();
-                            Code* p2 = re_lens[bits].front();
-                            re_lens[bits].pop();
-                            Code* p3 = re_lens[bits].front();
-                            re_lens[bits].pop();
-                            p->len = tbits + 1;
-                            p2->len = tbits + 1;
-                            p3->len = tbits + 1;
-                            re_lens[tbits + 1].push(p);
-                            re_lens[tbits + 1].push(p2);
-                            re_lens[tbits + 1].push(p3);
-                        }
-                    }*/
-                    //if (checkCodesOversubscribed(codes) != 1.0) {
                     std::string str = "Code tree is over or under subscribed!" + std::to_string(checkCodesOversubscribed(codes));
                     throw std::runtime_error(str.c_str());
-                    //}
                 }
                 return codes;
             }

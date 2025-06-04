@@ -318,7 +318,8 @@ private:
 
     };
     
-    static void makeUncompressedBlock (Bitstream& bs, uint8_t read_buffer[], size_t read_buffer_index, bool final) {
+    static Bitstream makeUncompressedBlock (uint8_t read_buffer[], size_t read_buffer_index, bool final) {
+        Bitstream bs;
         uint8_t pre = 0b000;
         if (final) {
             pre |= 1;
@@ -328,6 +329,7 @@ private:
         bs.addBits(read_buffer_index, 16);
         bs.addBits(~(read_buffer_index), 16);
         bs.addRawBuffer(read_buffer, read_buffer_index);
+        return bs;
     }
 
     // this is segfaulting on multi chunk files
@@ -560,12 +562,14 @@ private:
 
     // deflate
 
-    static Bitstream compressBuffer (uint32_t read_buffer[], size_t read_buffer_index, FlatHuffmanTree tree, FlatHuffmanTree dist_tree, uint32_t preamble, bool final, RangeLookup& rl, RangeLookup& dl) {
+    static Bitstream compressBuffer (uint32_t read_buffer[], size_t read_buffer_index, FlatHuffmanTree tree, FlatHuffmanTree dist_tree, uint32_t preamble, bool final, RangeLookup& rl, RangeLookup& dl, bool skip_pre = false) {
         // compress into huffman code format
         Bitstream bs;
         // writing the block out to file
-        uint32_t pre = (final) ? (preamble | 0b001) : preamble; 
-        bs.addBits(pre, 3);
+        if (!skip_pre) {
+            uint32_t pre = (final) ? (preamble | 0b001) : preamble; 
+            bs.addBits(pre, 3);
+        }
         if ((preamble & 0b100) == 4) {
             writeDynamicHuffmanTree(bs, tree, dist_tree, rl, dl);
         }
@@ -677,6 +681,8 @@ public:
         uint32_t read_buffer[131072];
         uint8_t raw_buffer[32768];
         std::memset(read_buffer, 0, 131072);
+        bool last_dynamic = false;
+        std::pair<FlatHuffmanTree, FlatHuffmanTree> last_trees;
          while (!q) {
             for (; index < data_size && read_buffer_index < KB32; index++, read_buffer_index++) {
                 read_buffer[read_buffer_index] = ((uint32_t)data[index]) & 0xff;
@@ -700,26 +706,26 @@ public:
                 #endif
                 set_fixed = true;
             }
-            
-            Bitstream bs_dynamic;
             Bitstream bs_fixed = compressBuffer(read_buffer, read_buffer_index, fixed_huffman, fixed_dist_huffman, 0b010, q, rl, dl);
-            if (!set_fixed) {
-                try {
-                    bs_dynamic = compressBuffer(read_buffer, read_buffer_index, trees.first, trees.second, 0b100, q, rl, dl);
-                } catch (std::runtime_error e) {
-                    #ifdef DEBUG
-                    std::cout << "Dynamic tree oversubscribed!\n";
-                    #endif
-                    set_fixed = true;
-                }
+            Bitstream bs_dynamic;
+            try {
+                bs_dynamic = compressBuffer(read_buffer, read_buffer_index, trees.first, trees.second, 0b100, q, rl, dl);
+            } catch (std::runtime_error e) {
+                #ifdef DEBUG
+                std::cout << "Dynamic tree oversubscribed!\n";
+                #endif
+                set_fixed = true;
             }
-            if ((bs_fixed.getSize() < (read_buffer_index + 5) && (bs_fixed.getSize() <= bs_dynamic.getSize())) || set_fixed) {
-                out_stream.copyBitstream(bs_fixed);
-            } else if (!set_fixed && bs_dynamic.getSize() < (read_buffer_index + 5)) {
-                out_stream.copyBitstream(bs_dynamic);
+
+            Bitstream picked;
+            if (!set_fixed && bs_dynamic.getSize() < bs_fixed.getSize() && bs_dynamic.getSize() < read_buffer_index + 5) {
+                picked = bs_dynamic;
+            } else if(bs_fixed.getSize() < read_buffer_index + 5){
+                picked = bs_fixed;
             } else {
-                makeUncompressedBlock(out_stream, raw_buffer, read_buffer_index, q);
+                picked = makeUncompressedBlock(raw_buffer, read_buffer_index, q);
             }
+            out_stream.copyBitstream(picked);
             read_buffer_index = 0;
         }
         return out_stream.getData();
