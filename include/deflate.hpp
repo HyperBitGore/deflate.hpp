@@ -96,29 +96,24 @@ private:
                 bit_offset = b.bit_offset;
             }
             void addBits (uint32_t val, uint8_t count) {
-                for (uint32_t i = 0; i < count; i++, bit_offset++) {
+                // see how much of current byte we can shove from val
+                for (int32_t i = count; i > 0;) {
+                    uint32_t remaining = 8 - bit_offset;
+                    uint32_t change = ((i) < remaining) ? i : remaining;
+                    // get bit mask for remaining bits to be written
+                    uint32_t mask = (1 << change) - 1;
+                    // mask bits from val
+                    data[offset] |= ((val & mask) << bit_offset);
+                    // move value down corresponding to bits removed
+                    val >>= change;
+                    i -= change;
+                    bit_offset += change;
                     if (bit_offset > 7) {
                         data.push_back(0);
                         offset++;
                         bit_offset = 0;
                     }
-                    uint8_t bit = extract1Bit(val, i);
-                    data[offset] |= (bit << bit_offset);
                 }
-            }
-            void addBitsMSB (uint32_t val, uint8_t count) {
-                for (uint32_t i = 0; i < count; i++, bit_offset++) {
-                    if (bit_offset > 7) {
-                        data.push_back(0);
-                        offset++;
-                        bit_offset = 0;
-                    }
-                    uint8_t bit = extract1Bit(val, i);
-                    data[offset] |= (bit << (7 - bit_offset));
-                }
-            }
-            uint8_t curBit () {
-                return bit_offset;
             }
             void nextByteBoundary () {
                 
@@ -134,11 +129,6 @@ private:
 
             std::vector<uint8_t> getData () {
                 return data;
-            }
-            void addRawBuffer (std::vector<uint8_t> buffer) {
-                for (auto& i : buffer) {
-                    addBits(i, 8);
-                }
             }
             void addRawBuffer (uint8_t buffer[], size_t n) {
                 for (size_t i = 0; i < n; i++) {
@@ -188,7 +178,7 @@ private:
             }
             else if (n >= 4) {
                 uint32_t out = (uint32_t)(buffer[offset]) | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16) | (buffer[offset + 3] << 24);
-                offset += 3;
+                offset += 4;
                 return out;
             } else {
                 uint32_t c = 0;
@@ -239,8 +229,6 @@ private:
             #ifdef DEBUG
             auto start = std::chrono::high_resolution_clock::now();
             #endif
-            size_t matches = 0;
-            size_t hashesAdded = 0;
             while (window_index < size) {
                 uint32_t bytes = grabFourBytes(raw_buffer, size, window_index);
                 uint32_t w = hashFunc(bytes);
@@ -251,7 +239,6 @@ private:
                     }
                     uint32_t start = (map[h].data & 0xfffffe00) >> 9;
                     if (grabFourBytes(raw_buffer, size, start) == bytes) {
-                        matches++;
                         // read four bytes until unequal
                         // if unequal read drop a byte from last four bytes until same or out
                         uint32_t off = window_index+4;
@@ -302,16 +289,12 @@ private:
                     }
                 } else {
                     addHash(4, window_index, w);
-                    hashesAdded++;
                 }
-
                 window_index+=4;
             }
             #ifdef DEBUG
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double, std::milli> elapsed = end - start;
-            std::cout << "matches: " << matches << "\n";
-            std::cout << "hashes added: " << hashesAdded << "\n";
             std::cout << "match execution time: " << elapsed.count() << " ms\n";
             #endif
         }
@@ -552,7 +535,6 @@ private:
         for (uint32_t i = 0; i <= max; i++) {
             bs.addBits(codes[i].len, 3);
         }
-        // bs.nextByteBoundaryConditional();
         // compressed separate, not treated as one run of bits
         // main huffman tree
         compressDynamicHuffmanTreeCodes(huff_bytes, bs, code_tree) ;

@@ -118,13 +118,13 @@ void testDeflateSpeed(std::string path, size_t n) {
         total += elapsed.count();
         std::cout << "hppdeflate execution time: " << elapsed.count() << " ms\n";
     }
-    std::cout << "Average: " << (total / n) << "\n";
+    std::cout << "Average: " << (total / n) << " ms\n";
 }
 
 int main () {
 
     std::cout << "Libdeflate test!\n";
-    testDeflateSpeed("test.bmp", 3);
+    testDeflateSpeed("test.bmp", 10);
     testDeflateSpeed("large.bmp", 1);
     testDecompressionFile("test.bmp");
     testDecompressionFile("tiny.bmp");

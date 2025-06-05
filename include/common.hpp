@@ -13,11 +13,9 @@
 
 // deflate
 //  -add file version
-//  -add error checking and maybe test files lol
+//  -if want to imprve file size, maybe add ability to look back into window at different offsets for string matching, speed more important for now
 //  -optimize
 //      -check if would be smaller to make new block or keep current block?
-//      -add string match chaining??
-//      -make addbits more efficient (grab chunks of bits rather than one at at time)
 
 // inflate
 //  -add file version
