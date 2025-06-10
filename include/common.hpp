@@ -14,8 +14,6 @@
 // deflate
 //  -add file version
 //  -if want to imprve file size, maybe add ability to look back into window at different offsets for string matching, speed more important for now
-//  -optimize
-//      -check if would be smaller to make new block or keep current block?
 
 // inflate
 //  -add file version

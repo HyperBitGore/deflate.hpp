@@ -660,11 +660,9 @@ public:
         Bitstream out_stream;
 
         size_t read_buffer_index = 0;
-        uint32_t read_buffer[131072];
-        uint8_t raw_buffer[32768];
-        std::memset(read_buffer, 0, 131072);
-        bool last_dynamic = false;
-        std::pair<FlatHuffmanTree, FlatHuffmanTree> last_trees;
+        uint32_t read_buffer[KB32];
+        uint8_t raw_buffer[KB32];
+        std::memset(read_buffer, 0, KB32);
          while (!q) {
             for (; index < data_size && read_buffer_index < KB32; index++, read_buffer_index++) {
                 read_buffer[read_buffer_index] = ((uint32_t)data[index]) & 0xff;
