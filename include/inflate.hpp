@@ -52,31 +52,9 @@ class inflate : deflate_compressor {
         }
 
         uint32_t readBits (uint8_t bits) {
-            if (bits > 32) {
-                return 0;
-            }
             uint32_t val = 0;
             for (uint32_t i = 0; i < bits; i++) {
                 val |= (extract1Bit(data[offset], bit_offset++) << i);
-                if (bit_offset > 7) {
-                    offset++;
-                    if (offset >= size) {
-                        return val;
-                    }
-                    bit_offset = 0;
-                }
-            }
-            return val;
-        }
-
-        uint32_t readBitsMSB (uint8_t bits) {
-            if (bits > 32) {
-                return 0;
-            }
-            uint32_t val = 0;
-            for (uint32_t i = 0; i < bits; i++) {
-                uint32_t b = extract1Bit(data[offset], bit_offset++);
-                val = (val << 1) | b;
                 if (bit_offset > 7) {
                     offset++;
                     if (offset >= size) {

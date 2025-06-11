@@ -13,7 +13,7 @@
 
 // deflate
 //  -if want to imprve file size, maybe add ability to look back into window at different offsets for string matching, speed more important for now
-//  -fix weird artifact in large.bmp (def smth do with matching function)
+//      -maybe hashing for this method isn't the way?? ^
 
 // inflate
 //  -optimize code reading, make one function in bitwrapper???
