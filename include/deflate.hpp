@@ -2,6 +2,7 @@
 #include "common.hpp"
 #include <cstdint>
 #include <utility>
+#include <vector>
 #ifdef DEBUG
 #include <iostream>
 #include <chrono>
@@ -149,8 +150,38 @@ private:
                     addBits(bs.data[bs.offset], bs.bit_offset);
                 }
             }
+            void clear () {
+                bit_offset = 0;
+                offset = 0;
+                data.clear();
+            }
+            uint8_t getBits () {
+                return bit_offset;
+            }
     };
-
+    class BitFile {
+    private:
+        Bitstream bs;
+        std::ofstream out_file;
+    public:
+        BitFile (std::string file) {
+            out_file.open(file.c_str(), std::ios::binary);
+        }
+        ~BitFile() {
+            out_file.close();
+        }
+        void writeFile () {
+            std::vector<uint8_t> c = bs.getData();
+            out_file.write((char*)c.data(), c.size());
+            bs.clear();
+        }
+        void addBitStream (const Bitstream& b) {
+            bs.copyBitstream(b);
+            if (bs.getBits() == 0) {
+                writeFile();
+            } 
+        }
+    };
     
     //https://cs.stanford.edu/people/eroberts/courses/soco/projects/data-compression/lossless/lz77/concept.htm
     //https://en.wikipedia.org/wiki/LZ77_and_LZ78
@@ -592,62 +623,72 @@ private:
 public:
     // not done
     static size_t compress (std::string file_path, std::string new_file) {
-       /* std::streampos sp = getFileSize(file_path);
-        std::ifstream fi;
-        fi.open(file_path, std::ios::binary);
-        if (!fi) {
-            return 0;
-        }
-        std::ofstream of;
-        of.open(new_file, std::ios::binary);
-        if (!of) {
-            return 0;
-        }
         FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
         FlatHuffmanTree fixed_huffman(generateFixedCodes());
-        uint8_t c;
+        RangeLookup rl = generateLengthLookup();
+        RangeLookup dl = generateDistanceLookup();
         bool q = false;
-        std::vector<uint8_t> buffer;
-        size_t out_index = 0;
+        size_t index = 0;
+
+        size_t read_buffer_index = 0;
+        uint32_t read_buffer[KB32];
+        uint8_t raw_buffer[KB32];
+        std::memset(read_buffer, 0, KB32);
+
+        std::ifstream f;
+        f.open(file_path.c_str(), std::ios::binary);
+
+        BitFile out_file(new_file);
+        size_t out_size = 0;
         while (!q) {
-            std::streampos p = sp - fi.tellg();
-            if (p > 0 && buffer.size() < KB32) {
-                c = fi.get();
-                buffer.push_back(c);
-            } else {
-                // writing the block out to file
-                if (p <= 0) {
-                    q = true;
-                }
-                LZ77 lz(KB32);
-                // finding the matches above length of 2
-                lz.getMatches(buffer);
-                std::sort(matches.begin(), matches.end(), match_index_comp);
-
-                std::vector<uint8_t> output_buffer;
-                std::pair<FlatHuffmanTree, FlatHuffmanTree> trees = constructDynamicHuffmanTree(buffer, matches);
-
-                Bitstream bs_fixed = compressBuffer(buffer, matches, fixed_huffman, fixed_dist_huffman, 0b001, q);
-                Bitstream bs_dynamic = compressBuffer(buffer, matches, trees.first, trees.second, 0b010, q);
-                if (bs_fixed.getSize() < (buffer.size() + 5) && bs_fixed.getSize() < bs_dynamic.getSize()) {
-                    output_buffer = bs_fixed.getData();
-                } else if (bs_dynamic.getSize() < (buffer.size() + 5)) {
-                    output_buffer = bs_dynamic.getData();
-                } else {
-                    // output_buffer = makeUncompressedBlock(buffer, q).getData();
-                }
-                // compare size of bs
-                for (auto& i : output_buffer) {
-                    of << i;
-                    out_index++;
-                }
-                buffer.clear();
+            f.read((char*)(raw_buffer), KB32);
+            std::streamsize read = f.gcount();
+            for(size_t i = 0; i < read; i++, read_buffer_index++) {
+                read_buffer[read_buffer_index] = ((uint32_t)raw_buffer[i] & 0xff);
             }
-        }
+            // writing the block out to file
+            if (read < KB32) {
+                q = true;
+            }
+            LZ77 lz(KB32);
+            // finding the matches above length of 2
+            lz.getMatches(read_buffer, raw_buffer, read_buffer_index, rl, dl);
 
-        fi.close();
-        of.close();*/
-        return 0;
+            std::pair<FlatHuffmanTree, FlatHuffmanTree> trees;
+            bool set_fixed = false;
+            try {
+                trees = constructDynamicHuffmanTree(read_buffer, read_buffer_index, rl, dl);
+            } catch (std::runtime_error e) {
+                #ifdef DEBUG
+                std::cout << "Dynamic tree oversubscribed!\n";
+                #endif
+                set_fixed = true;
+            }
+            Bitstream bs_fixed = compressBuffer(read_buffer, read_buffer_index, fixed_huffman, fixed_dist_huffman, 0b010, q, rl, dl);
+            Bitstream bs_dynamic;
+            try {
+                bs_dynamic = compressBuffer(read_buffer, read_buffer_index, trees.first, trees.second, 0b100, q, rl, dl);
+            } catch (std::runtime_error e) {
+                #ifdef DEBUG
+                std::cout << "Dynamic tree oversubscribed!\n";
+                #endif
+                set_fixed = true;
+            }
+
+            Bitstream picked;
+            if (!set_fixed && bs_dynamic.getSize() < bs_fixed.getSize() && bs_dynamic.getSize() < read_buffer_index + 5) {
+                picked = bs_dynamic;
+            } else if(bs_fixed.getSize() < read_buffer_index + 5){
+                picked = bs_fixed;
+            } else {
+                picked = makeUncompressedBlock(raw_buffer, read_buffer_index, q);
+            }
+            out_file.addBitStream(picked);
+            read_buffer_index = 0;
+        }
+        out_file.writeFile();
+        f.close();
+        return out_size;
     }
 
     static std::vector<uint8_t> compress (char* data, size_t data_size) {

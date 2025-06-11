@@ -12,11 +12,10 @@
 #include <fstream>
 
 // deflate
-//  -add file version
 //  -if want to imprve file size, maybe add ability to look back into window at different offsets for string matching, speed more important for now
+//  -fix weird artifact in large.bmp (def smth do with matching function)
 
 // inflate
-//  -add file version
 //  -optimize code reading, make one function in bitwrapper???
 //      -reduce cycles by reading larger blocks of bits?? min length of bits for tree???
 

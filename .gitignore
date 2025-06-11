@@ -13,3 +13,5 @@ libtestdeflate_tiny.txt
 *libtestinflate.bmp
 *hpptestinflatehpp.bmp
 tmp.7z
+hppdeflate_testbmp
+hppinflate_test.bmp

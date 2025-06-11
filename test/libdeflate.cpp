@@ -129,7 +129,8 @@ int main () {
     testDecompressionFile("test.bmp");
     testDecompressionFile("tiny.bmp");
     testDecompressionFile("large.bmp");
-
+    deflate::compress("test.bmp", "hppdeflate_testbmp");
+    inflate::decompress("hppdeflate_testbmp", "hppinflate_test.bmp");
 
     return 0;
 }

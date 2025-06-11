@@ -1,6 +1,6 @@
 #pragma once
 #include "common.hpp"
-
+#define KB32 32768
 /*
 In other words, if one were to print out the compressed data as
 a sequence of bytes, starting with the first byte at the
@@ -259,7 +259,7 @@ class inflate : deflate_compressor {
     }
     public:
 
-    // not done
+    // done
     static size_t decompress (void* in, size_t in_size, void* out, size_t out_size) {
         Bitwrapper dat = Bitwrapper(in, in_size);
         uint8_t* out_data = (uint8_t*)out;
@@ -314,69 +314,60 @@ class inflate : deflate_compressor {
     }
 
     // not done
-    static void decompress (std::string file_path, std::string new_file) {
+    static size_t decompress (std::string file_path, std::string new_file) {
         //creating default huffman tree
         std::vector <Code> fixed_codes = generateFixedCodes();
         std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
         FlatHuffmanTree fixed_huffman(fixed_codes);
         FlatHuffmanTree fixed_dist_huffman(fixed_dist_codes);
-        //starting parse of file
-        std::ofstream nf;
-        nf.open(new_file, std::ios::binary);
+        
+        uint8_t read_buffer[KB32];
+        std::vector<uint8_t> out_buffer;
         std::ifstream f;
         f.open(file_path, std::ios::binary);
-        //reading bits
-        bool e = true;
-        while(e) {
-            //read the first three bits
-            char c = f.get();
-            uint16_t len;
-            uint16_t nlen;
-            uint8_t bfinal = extract1Bit(c, 0);
-            uint8_t btype = (extract1Bit(c, 1) | extract1Bit(c, 2));
-            //rest of block parsing
-            switch (btype) {
-                //uncompressed block
+        std::ofstream out_file;
+        out_file.open(new_file.c_str(), std::ios::binary);
+        size_t size = 0;
+        while (true) {
+            std::memset(read_buffer, 0, KB32);
+            out_buffer.clear();
+            // read 32kb from the file then 
+            f.read((char*)read_buffer, KB32);
+            std::streamsize read = f.gcount();
+            Bitwrapper dat(read_buffer, read);
+            uint8_t final = dat.readBits(1);
+            uint8_t type = dat.readBits(2);
+            FlatHuffmanTree used_tree = fixed_huffman;
+            FlatHuffmanTree used_dist = fixed_dist_huffman;
+            switch (type) {
                 case 0:
-                    //skip remaining bits
-                    //read len bytes
-                    len = f.get();
-                    len |= (f.get() << 8);
-                    //read nlen bytes
-                    nlen = f.get();
-                    // NOLINTNEXTLINE
-                    nlen |= (f.get() << 8);
-                    //read the rest of uncompressed block
-                    for (uint32_t i = 0; i < len; i++) {
-                        uint8_t n = f.get();
-                        nf << n;
+                {
+                    dat.moveByte(true);
+                    uint16_t len = dat.readBits(16);
+                    uint16_t nlen = dat.readBits(16);
+                    for (size_t i = 0; i < len; i++) {
+                        out_buffer.push_back(dat.readByte());
                     }
+                }
                 break;
-                //compressed alphabet
-                    //0-255 literals
-                    //256 end of block
-                    //257-285 length codes
-                //parse the blocks with uint16_ts since the values go up to 287, technically but the 286-287 don't participate
-                //compressed with fixed huffman codes
-                case 1:
-                    
-                break;
-                //compressed with dynamic huffman codes
                 case 2:
-                
-                break;
-                //error block (reserved)
-                case 3:
-                    e = false;
+                    {
+                        std::pair<FlatHuffmanTree, FlatHuffmanTree> trees = decodeTree(dat);
+                        used_tree = trees.first;
+                        used_dist = trees.second;
+                    }
+                case 1:
+                    decompressHuffmanBlock(dat, out_buffer, used_tree, used_dist);
                 break;
             }
-            //means we finished decoding the final block
-            if (bfinal) {
-                e = false;
+            out_file.write((char*)out_buffer.data(), out_buffer.size());
+            size += out_buffer.size();
+            if (final) {
+                break;
             }
         }
-
+        out_file.close();
         f.close();
-        nf.close();
+        return size;
     }
 };
