@@ -1,8 +1,11 @@
-Simple implementation of deflate and inflate
-To use deflate
-    -import deflate.hpp
-    -call deflate::compress
-    -deflate has two levels of compression, better compression is much longer time
-To use inflate
-    -import inflate.hpp
-    -call inflate::decompress
+Simple Implementation of Deflate and Inflate
+To Use Deflate
+
+    Import deflate.hpp.
+    Call deflate::compress.
+    Deflate offers two levels of compression; better compression requires significantly more time.
+
+To Use Inflate
+
+    Import inflate.hpp.
+    Call inflate::decompress.
