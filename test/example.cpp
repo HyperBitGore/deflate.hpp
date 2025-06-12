@@ -20,8 +20,8 @@ int main(){
     of.close();
     inflate::decompress("uncompressed.test", "uncompressed.parsed");
 
-    deflate::compress("lz.test", "lz.compressed");
+    deflate::compress("lz.test", "lz.compressed", false);
     
-    deflate::compress("Test-export.txt", "Test-export.comp");
+    deflate::compress("Test-export.txt", "Test-export.comp", false);
 
 }

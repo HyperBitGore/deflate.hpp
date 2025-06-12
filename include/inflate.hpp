@@ -53,13 +53,17 @@ class inflate : deflate_compressor {
 
         uint32_t readBits (uint8_t bits) {
             uint32_t val = 0;
-            for (uint32_t i = 0; i < bits; i++) {
-                val |= (extract1Bit(data[offset], bit_offset++) << i);
+            uint32_t total_bits = 0;
+            for (int32_t i = bits; i > 0;) {
+                uint32_t remaining = 8 - bit_offset;
+                uint32_t change = ((i) < remaining) ? i : remaining;
+                uint32_t chunk = (data[offset] >> bit_offset) & ((1 << change) - 1); // mask created here and grab data same line
+                val |= (chunk << total_bits); // move captured data to correct spot in val
+                bit_offset += change;
+                total_bits += change;
+                i -= change;
                 if (bit_offset > 7) {
                     offset++;
-                    if (offset >= size) {
-                        return val;
-                    }
                     bit_offset = 0;
                 }
             }
@@ -291,7 +295,56 @@ class inflate : deflate_compressor {
         return ot;
     }
 
-    // not done
+    static std::vector<uint8_t> decompress (void* in, size_t in_size) {
+        Bitwrapper dat = Bitwrapper(in, in_size);
+        //creating default huffman tree
+        std::vector <Code> fixed_codes = generateFixedCodes();
+        std::vector <Code> fixed_dist_codes = generateFixedDistanceCodes();
+        FlatHuffmanTree fixed_huffman(fixed_codes);
+        FlatHuffmanTree fixed_dist_huffman(fixed_dist_codes);
+        
+        uint32_t it = 0;
+        uint32_t ot = 0;
+        std::vector<uint8_t> buffer;
+        while (true) {
+            uint8_t final = dat.readBits(1);
+            uint8_t type = dat.readBits(2);
+            FlatHuffmanTree used_tree = fixed_huffman;
+            FlatHuffmanTree used_dist = fixed_dist_huffman;
+            switch (type) {
+                case 0:
+                {
+                    dat.moveByte(true);
+                    uint16_t len = dat.readBits(16);
+                    it += 2;
+                    uint16_t nlen = dat.readBits(16);
+                    it += 2;
+                    for (size_t i = 0; i < len; i++) {
+                        buffer.push_back(dat.readByte());
+                    }
+                }
+                break;
+                case 2:
+                    {
+                        std::pair<FlatHuffmanTree, FlatHuffmanTree> trees = decodeTree(dat);
+                        used_tree = trees.first;
+                        used_dist = trees.second;
+                    }
+                case 1:
+                    decompressHuffmanBlock(dat, buffer, used_tree, used_dist);
+                break;
+            }
+            if (final) {
+                break;
+            }
+            else if (it >= in_size) {
+                return {};
+            }
+        }
+        return buffer;
+    }
+
+    // done
     static size_t decompress (std::string file_path, std::string new_file) {
         //creating default huffman tree
         std::vector <Code> fixed_codes = generateFixedCodes();

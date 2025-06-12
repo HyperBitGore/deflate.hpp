@@ -12,14 +12,9 @@
 #include <fstream>
 
 // deflate
-//  -if want to imprve file size, maybe add ability to look back into window at different offsets for string matching, speed more important for now
-//      -maybe hashing for this method isn't the way?? ^
 
 // inflate
-//  -optimize code reading, make one function in bitwrapper???
-//      -reduce cycles by reading larger blocks of bits?? min length of bits for tree???
-
-//cleanup
+//  -if ever need to optimize inflate, add a code lookup table in huffman tree
 
 class deflate_compressor {
     protected:
@@ -27,12 +22,6 @@ class deflate_compressor {
     //from right to left
     static uint8_t extract1Bit(uint32_t c, uint16_t n) {
         return (c >> n) & 1;
-    }
-    static uint8_t extract1BitLeft (uint32_t c, uint16_t n) {
-        return ((c << n) & 0b10000000000000000000000000000000) >> 31;
-    }
-    static uint8_t extract1BitLeft (uint8_t c, uint8_t n) {
-        return ((c << n) & 0b10000000) >> 7;
     }
 
     struct Code {

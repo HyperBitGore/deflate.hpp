@@ -3,8 +3,10 @@
 #include <cstdint>
 #include <utility>
 #include <vector>
+#ifdef DEBUG
 #include <iostream>
 #include <chrono>
+#endif
 #define MAX_LITLEN_CODE_LEN 15
 #define MAX_DIST_CODE_LEN 15
 #define MAX_PRE_CODE_LEN 7
@@ -200,21 +202,21 @@ private:
             uint32_t t = (n * 0x1E35A7BD) >> (32 - 15);
             return t;
         }
-        inline uint32_t grabThreeBytes (uint8_t buffer[], size_t size, size_t offset) {
+        inline std::pair<uint32_t, uint32_t> grabThreeBytes (uint8_t buffer[], size_t size, size_t offset) {
             int32_t n = ((int32_t)size - (int32_t)offset);
             if (n <= 0) {
-                return 0;
+                return {0, 0};
             }
             else if (n >= 3) {
                 uint32_t out = (uint32_t)(buffer[offset]) | (buffer[offset + 1] << 8) | (buffer[offset + 2] << 16);
                 offset += 3;
-                return out;
+                return {out, 3};
             } else {
                 uint32_t c = 0;
                 for (size_t i = 0; i < n; i++, offset++) {
                     c |= (buffer[offset] << (i * 8));
                 }
-                return c;
+                return {c, n};
             }
         }
         inline std::pair<uint32_t, int32_t> grabFourBytes (uint8_t buffer[], size_t size, size_t offset) {
@@ -267,58 +269,40 @@ private:
         }
         void getMatchesSlow (uint32_t read_buffer[], uint8_t raw_buffer[], size_t read_buffer_index, RangeLookup& rl, RangeLookup& dl) {
             const size_t size = read_buffer_index;
+            #ifdef DEBUG
             auto start = std::chrono::high_resolution_clock::now();
+            #endif
             while (window_index < size) {
-                uint32_t windowBytes = grabThreeBytes(raw_buffer, size, window_index);
-                uint32_t windowHash = hashFunc(windowBytes);
-                uint32_t match_length = 0;
-                uint32_t match_offset = 0;
-                if (hashMatch(windowHash)) {
-                    // move forward until we find match from hash chain
-                    int32_t h = windowHash;
-                    for (; h > -1 && grabThreeBytes(raw_buffer, size, (map[h].data & 0xfffffe00) >> 9) != windowBytes; h = map[h].next);
-                    if (h != -1) {
-                        uint32_t start = (map[h].data & 0xfffffe00) >> 9;
-                        uint32_t tempLength = 3;
-                        for (uint32_t j = start + 3, k = window_index + 3; j < size && k < size && raw_buffer[j] == raw_buffer[k]; j++, k++, tempLength++);
-                        if (tempLength > match_length) {
-                            match_length = tempLength;
-                            match_offset = start;
-                            Range r = rl.lookup(match_length);
-                            uint32_t o = (match_length) - r.start;
-                            uint32_t of = window_index-match_offset;
-                            read_buffer[window_index] = (of << 14) | (o << 9) | (r.code & CHAR_BITS);
-                        }     
-                    }
-                } else {
-                    addHash(3, window_index, windowHash);
+                std::pair<uint32_t, uint32_t> windowBytes = grabThreeBytes(raw_buffer, size, window_index);
+                if (windowBytes.second < 3) {
+                    return;
                 }
-                /*for (int32_t i = window_index-1; i >= 0; i--) {
-                    uint32_t lookbackBytes = grabThreeBytes(raw_buffer, size, i);
-                    if (lookbackBytes == windowBytes) {
+                uint32_t match_length = 0;
+                uint32_t windowHash = hashFunc(windowBytes.first);
+                for (int32_t i = window_index-1; i >= 0; i--) {
+                    std::pair<uint32_t, uint32_t> lookbackBytes = grabThreeBytes(raw_buffer, size, i);
+                    if (lookbackBytes.first == windowBytes.first) {
                         // loop forward seeing how long bytes are equal
                         uint32_t tempLength = 3;
-                        match_offset = i;
                         size_t j = i + 3;
                         size_t k = window_index + 3;
-                        for (; j < size && raw_buffer[j] == raw_buffer[k] && match_length < 258; j++, k++, tempLength++);
+                        for (; j < size && k < size && raw_buffer[j] == raw_buffer[k] && match_length < 258; j++, k++, tempLength++);
                         if (tempLength > match_length) {
                             match_length = tempLength;
-                            match_offset = i;
+                            Range r = rl.lookup(match_length);
+                            uint32_t o = (match_length) - r.start;
+                            uint32_t of = window_index-i;
+                            read_buffer[window_index] = (of << 14) | (o << 9) | (r.code & CHAR_BITS);
                         }
                     }
                 }
-                if (match_length >= 3) {
-                    Range r = rl.lookup(match_length);
-                    uint32_t o = (match_length) - r.start;
-                    uint32_t of = window_index-match_offset;
-                    read_buffer[window_index] = (of << 14) | (o << 9) | (r.code & CHAR_BITS);
-                }*/
                 window_index++;
             }
+            #ifdef DEBUG
             auto end = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double, std::milli> elapsed = end - start;
             std::cout << "slow match execution time: " << elapsed.count() << " ms\n";
+            #endif
         }
         // modifies the read_buffer to contain matches lol
         //https://github.com/ebiggers/libdeflate/blob/master/lib/hc_matchfinder.h
@@ -371,8 +355,6 @@ private:
                                     uint32_t o = j + i - r.start;
                                     uint32_t of = window_index-start;
                                     uint32_t of_m = (of << 14);
-                                    // std::cout << "match: " << j + i << ", " << of << ", " << r.code << "\n";
-                                    // std::cout << "start: " << start << ", windowIndex:" << window_index << "\n";
                                     read_buffer[window_index] = (of << 14) | (o << 9) | (r.code & CHAR_BITS);
                                     break;
                                 } else {
@@ -380,8 +362,6 @@ private:
                                     uint32_t o = (j) - r.start;
                                     uint32_t of = window_index-start;
                                     uint32_t of_m = (of << 14);
-                                    // std::cout << "match: " << j << ", " << of << ", " << r.code << "\n";
-                                    // std::cout << "start: " << start << ", windowIndex:" << window_index << "\n";
                                     read_buffer[window_index] = (of << 14) | (o << 9) | (r.code & CHAR_BITS);
                                     break;
                                 }
@@ -696,7 +676,7 @@ private:
     }
 public:
     // done
-    static size_t compress (std::string file_path, std::string new_file) {
+    static size_t compress (std::string file_path, std::string new_file, bool better_compression) {
         FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
         FlatHuffmanTree fixed_huffman(generateFixedCodes());
         RangeLookup rl = generateLengthLookup();
@@ -726,8 +706,11 @@ public:
             }
             LZ77 lz(KB32);
             // finding the matches above length of 2
-            lz.getMatches(read_buffer, raw_buffer, read_buffer_index, rl, dl);
-
+            if (better_compression) {
+                lz.getMatchesSlow(read_buffer, raw_buffer, read_buffer_index, rl, dl);
+            } else {
+                lz.getMatches(read_buffer, raw_buffer, read_buffer_index, rl, dl);
+            }
             std::pair<FlatHuffmanTree, FlatHuffmanTree> trees;
             bool set_fixed = false;
             try {
@@ -765,7 +748,7 @@ public:
         return out_size;
     }
 
-    static std::vector<uint8_t> compress (char* data, size_t data_size) {
+    static std::vector<uint8_t> compress (char* data, size_t data_size, bool better_compression) {
         FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
         FlatHuffmanTree fixed_huffman(generateFixedCodes());
         RangeLookup rl = generateLengthLookup();
@@ -789,7 +772,11 @@ public:
             }
             LZ77 lz(KB32);
             // finding the matches above length of 2
-            lz.getMatches(read_buffer, raw_buffer, read_buffer_index, rl, dl);
+            if (better_compression) {
+                lz.getMatchesSlow(read_buffer, raw_buffer, read_buffer_index, rl, dl);
+            } else {
+                lz.getMatches(read_buffer, raw_buffer, read_buffer_index, rl, dl);
+            }
 
             std::pair<FlatHuffmanTree, FlatHuffmanTree> trees;
             bool set_fixed = false;

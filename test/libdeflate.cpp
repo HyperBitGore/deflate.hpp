@@ -55,7 +55,7 @@ File readFile (std::string name) {
     return file;
 }
 
-bool testDecompressionFile (std::string path) {
+bool testDecompressionFile (std::string path, bool compression_higher) {
     File file = readFile(path);
     std::cout << path << " is " << file.size << " bytes!\n";
     libdeflate_compressor* compressor = libdeflate_alloc_compressor(1);
@@ -78,7 +78,7 @@ bool testDecompressionFile (std::string path) {
     bool same = sameData(&out_data_inhpp, &file);
     std::cout << path << " inflate.hpp is the same as original?: " << ((same) ?  "true" : "false")  << "\n"; 
 
-    std::vector<uint8_t> out_data_hpp = deflate::compress(file.data, file.size);
+    std::vector<uint8_t> out_data_hpp = deflate::compress(file.data, file.size, compression_higher);
     if (out_data_hpp.size() == 0) {
         return false;
     }
@@ -105,13 +105,13 @@ bool testDecompressionFile (std::string path) {
     return true;
 }
 
-void testDeflateSpeed(std::string path, size_t n) {
+void testDeflateSpeed(std::string path, size_t n, bool compress_better) {
     File file = readFile(path);
     double total = 0;
     for (size_t i = 0; i < n; i++) {
         auto start = std::chrono::high_resolution_clock::now();
         
-        std::vector<uint8_t> out_data_hpp = deflate::compress(file.data, file.size);
+        std::vector<uint8_t> out_data_hpp = deflate::compress(file.data, file.size, compress_better);
 
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> elapsed = end - start;
@@ -121,16 +121,34 @@ void testDeflateSpeed(std::string path, size_t n) {
     std::cout << "Average: " << (total / n) << " ms\n";
 }
 
+void testInflateSpeed (std::string path, size_t n) {
+    File file = readFile(path);
+    double total = 0;
+    for (size_t i = 0; i < n; i++) {
+        auto start = std::chrono::high_resolution_clock::now();
+        std::vector<uint8_t> out_data_hpp = inflate::decompress(file.data, file.size);
+
+        auto end = std::chrono::high_resolution_clock::now();
+        std::chrono::duration<double, std::milli> elapsed = end - start;
+        total += elapsed.count();
+        std::cout << "hppinflate execution time: " << elapsed.count() << " ms\n";
+    }
+    std::cout << "Average: " << (total / n) << " ms\n";
+}
+
 int main () {
 
     std::cout << "Libdeflate test!\n";
-    testDeflateSpeed("test.bmp", 10);
-    testDeflateSpeed("large.bmp", 1);
-    testDecompressionFile("test.bmp");
-    testDecompressionFile("tiny.bmp");
-    testDecompressionFile("large.bmp");
-    deflate::compress("test.bmp", "hppdeflate_testbmp");
+    testDeflateSpeed("test.bmp", 10, false);
+    testDeflateSpeed("test.bmp", 1, true);
+    testDeflateSpeed("large.bmp", 1, false);
+    testDecompressionFile("test.bmp", false);
+    testDecompressionFile("tiny.bmp", false);
+    testDecompressionFile("test.bmp", true);
+    testDecompressionFile("tiny.bmp", true);
+    testDecompressionFile("large.bmp", false);
+    deflate::compress("test.bmp", "hppdeflate_testbmp", true);
     inflate::decompress("hppdeflate_testbmp", "hppinflate_test.bmp");
-
+    testInflateSpeed("large.bmplibtestdeflate.txt", 1);
     return 0;
 }
