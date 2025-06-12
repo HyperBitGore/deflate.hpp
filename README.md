@@ -14,14 +14,14 @@ A simple and efficient C++ implementation of the DEFLATE compression and INFLATE
 * Building this repo will just give the tests
 * Want to know more details how to use functions? Look at libdeflate_test.cpp or example.cpp in tests folder
 
-To Use Deflate
+### To Use Deflate
 
     Include deflate.hpp.
     Call deflate::compress.
     Deflate offers two levels of compression; better compression requires significantly more time.
     Modify the level with the bool at end of compression call parameters, true will enable the slower compression
 
-To Use Inflate
+### To Use Inflate
 
     Include inflate.hpp.
     Call inflate::decompress.
