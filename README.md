@@ -9,10 +9,10 @@ A simple and efficient C++ implementation of the DEFLATE compression and INFLATE
 * **Pure C++:** No external dependencies, making it highly portable.
 
 ### Good to Know
-* **Just throw the include directory in your project as an include directory, no other dependencies
-* **Targets C++17
-* **Building this repo will just give the tests
-* **Want to know more details how to use functions? Look at libdeflate_test.cpp or example.cpp in tests folder
+* Just throw the include directory in your project as an include directory, no other dependencies
+* Targets C++17
+* Building this repo will just give the tests
+* Want to know more details how to use functions? Look at libdeflate_test.cpp or example.cpp in tests folder
 
 To Use Deflate
 
