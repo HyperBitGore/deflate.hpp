@@ -136,9 +136,30 @@ void testInflateSpeed (std::string path, size_t n) {
     std::cout << "Average: " << (total / n) << " ms\n";
 }
 
+void compareInflateLibVector (std::string path) {
+    File file = readFile(path);
+    libdeflate_compressor* compressor = libdeflate_alloc_compressor(1);
+    File out_data_lib(file.size + 100);
+    //testing the two
+    size_t size_lib = libdeflate_deflate_compress(compressor, file.data, file.size, out_data_lib.data, file.size + 100);
+    std::vector<uint8_t> decomp = inflate::decompress(out_data_lib.data, size_lib);
+    for (size_t i = 0; i < decomp.size(); i++) {
+        uint8_t f = file.data[i];
+        uint8_t d = decomp[i];
+        if (f != d) {
+            std::cout << "inflate.hpp was different from original file: " << i << " , " << path << "\n";
+            return;
+        }
+    }
+    std::cout << "inflate.hpp was the same as original file!\n";
+    std::cout << path << "\n";
+}
+
 int main () {
 
     std::cout << "Libdeflate test!\n";
+
+    compareInflateLibVector("test.bmp");
     testDeflateSpeed("test.bmp", 10, false);
     testDeflateSpeed("test.bmp", 1, true);
     testDeflateSpeed("large.bmp", 1, false);
