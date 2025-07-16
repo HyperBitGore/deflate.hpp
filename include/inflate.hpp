@@ -303,8 +303,6 @@ class inflate : deflate_compressor {
         FlatHuffmanTree fixed_huffman(fixed_codes);
         FlatHuffmanTree fixed_dist_huffman(fixed_dist_codes);
         
-        uint32_t it = 0;
-        uint32_t ot = 0;
         std::vector<uint8_t> buffer;
         while (true) {
             uint8_t final = dat.readBits(1);
@@ -316,9 +314,7 @@ class inflate : deflate_compressor {
                 {
                     dat.moveByte(true);
                     uint16_t len = dat.readBits(16);
-                    it += 2;
                     uint16_t nlen = dat.readBits(16);
-                    it += 2;
                     for (size_t i = 0; i < len; i++) {
                         buffer.push_back(dat.readByte());
                     }
@@ -336,10 +332,12 @@ class inflate : deflate_compressor {
             }
             if (final) {
                 break;
-            }
-            else if (it >= in_size) {
+            } else if (dat.getOffset() > in_size) {
                 return {};
             }
+        }
+        if (buffer.size() < in_size) {
+            return {};
         }
         return buffer;
     }

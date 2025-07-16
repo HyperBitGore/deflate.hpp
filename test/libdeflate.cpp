@@ -155,11 +155,34 @@ void compareInflateLibVector (std::string path) {
     std::cout << path << "\n";
 }
 
+void testInflateFile (std::string path) {
+    File file = readFile(path);
+    std::vector<uint8_t> decomp = inflate::decompress(file.data, file.size);
+    libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
+    File lib(file.size * 4);
+    size_t ret = 0;
+    libdeflate_result result = libdeflate_deflate_decompress(decompressor, file.data, file.size, lib.data, lib.size, &ret);
+    if (result != LIBDEFLATE_SUCCESS) {
+        std::cout << "inflate file failed " << result << "\n";
+        return;
+    }
+    for (size_t i = 0; i < ret && i < decomp.size(); i++) {
+        if (decomp[i] != lib.data[i]) {
+            std::cout << "inflate file failed!\n";
+            std::cout << i << ", " << path << "\n";
+            return;
+        }
+    }
+    std::cout << "inflate file matched!\n";
+    std::cout << path << "\n";
+}
+
 int main () {
 
     std::cout << "Libdeflate test!\n";
 
     compareInflateLibVector("test.bmp");
+    testInflateFile("weird.dat");
     testDeflateSpeed("test.bmp", 10, false);
     testDeflateSpeed("test.bmp", 1, true);
     testDeflateSpeed("large.bmp", 1, false);
