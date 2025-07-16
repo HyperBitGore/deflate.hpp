@@ -241,6 +241,11 @@ class inflate : deflate_compressor {
     }
     public:
 
+    static size_t decompressZlib (void* in, size_t in_size, void* out, size_t out_size) {
+        // idc about zlib headers :)
+        return decompress((char*)in + 2, in_size-2, out, out_size);
+    }
+
     // done
     static size_t decompress (void* in, size_t in_size, void* out, size_t out_size) {
         Bitwrapper dat = Bitwrapper(in, in_size);
@@ -293,6 +298,11 @@ class inflate : deflate_compressor {
             out_data[ot++] = i;
         }
         return ot;
+    }
+
+    static std::vector<uint8_t> decompressZlib (void* in, size_t in_size) {
+        // idc about zlib data :)
+        return decompress(((char*)in) + 2, in_size-2);
     }
 
     static std::vector<uint8_t> decompress (void* in, size_t in_size) {

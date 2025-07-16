@@ -15,6 +15,9 @@
 
 // inflate
 //  -if ever need to optimize inflate, add a code lookup table in huffman tree
+//  -support zlib better
+//      -allow zlib files
+//      -parse dicts if fdict bit set
 
 class deflate_compressor {
     protected:
