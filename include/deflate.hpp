@@ -95,12 +95,13 @@ private:
             Bitstream (const Bitstream& b) {
                 data = b.data;
                 bit_offset = b.bit_offset;
+                offset = b.offset;
             }
             void addBits (uint32_t val, uint8_t count) {
                 // see how much of current byte we can shove from val
                 for (int32_t i = count; i > 0;) {
                     uint32_t remaining = 8 - bit_offset;
-                    uint32_t change = ((i) < remaining) ? i : remaining;
+                    uint32_t change = ((i) < (int32_t)remaining) ? i : remaining;
                     // get bit mask for remaining bits to be written
                     uint32_t mask = (1 << change) - 1;
                     // mask bits from val
@@ -213,7 +214,7 @@ private:
                 return {out, 3};
             } else {
                 uint32_t c = 0;
-                for (size_t i = 0; i < n; i++, offset++) {
+                for (size_t i = 0; i < (uint32_t)n; i++, offset++) {
                     c |= (buffer[offset] << (i * 8));
                 }
                 return {c, n};
@@ -230,7 +231,7 @@ private:
                 return {out, 4};
             } else {
                 uint32_t c = 0;
-                for (size_t i = 0; i < n; i++, offset++) {
+                for (size_t i = 0; i < (uint32_t)n; i++, offset++) {
                     c |= (buffer[offset] << (i * 8));
                 }
                 return {c, n};

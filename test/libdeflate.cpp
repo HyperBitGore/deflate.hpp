@@ -17,6 +17,45 @@ struct File {
     ~File() {
         std::free(data);
     }
+        // Copy constructor
+    File(const File& other) {
+        size = other.size;
+        data = static_cast<char*>(std::malloc(size));
+        if (!data) throw std::runtime_error("Copy allocation failed");
+        std::memcpy(data, other.data, size);
+    }
+
+    // Move constructor
+    File(File&& other) noexcept {
+        data = other.data;
+        size = other.size;
+        other.data = nullptr;
+        other.size = 0;
+    }
+
+    // Copy assignment
+    File& operator=(const File& other) {
+        if (this != &other) {
+            std::free(data);
+            size = other.size;
+            data = static_cast<char*>(std::malloc(size));
+            if (!data) throw std::runtime_error("Copy assignment allocation failed");
+            std::memcpy(data, other.data, size);
+        }
+        return *this;
+    }
+
+    // Move assignment
+    File& operator=(File&& other) noexcept {
+        if (this != &other) {
+            std::free(data);
+            data = other.data;
+            size = other.size;
+            other.data = nullptr;
+            other.size = 0;
+        }
+        return *this;
+    }
 };
 
 void writeBufferToFile (char* data, size_t size, std::string file_path) {
@@ -32,7 +71,7 @@ bool sameData (File* f1, File* f2) {
     }
     for (size_t i = 0; i < f1->size; i++) {
         if (f1->data[i] != f2->data[i]) {
-            std::cout << "failed at index " << i << "\n";
+            std::cerr << "failed at index " << i << "\n";
             return false;
         }
     }
@@ -48,6 +87,9 @@ size_t fileSize (std::string name) {
 File readFile (std::string name) {
     std::ifstream f;
     f.open(name, std::ios::binary);
+    if (!f) {
+        throw std::runtime_error("Failed to read file " + name);
+    }
     size_t sizef = fileSize(name);
     File file (sizef);
     f.read(file.data, sizef);
@@ -57,7 +99,7 @@ File readFile (std::string name) {
 
 bool testDecompressionFile (std::string path, bool compression_higher) {
     File file = readFile(path);
-    std::cout << path << " is " << file.size << " bytes!\n";
+    std::cerr << path << " is " << file.size << " bytes!\n";
     libdeflate_compressor* compressor = libdeflate_alloc_compressor(1);
     File out_data_lib(file.size + 100);
     //testing the two
@@ -65,7 +107,7 @@ bool testDecompressionFile (std::string path, bool compression_higher) {
     if (size_lib == 0) {
         return false;
     }
-    std::cout << "size of libdeflate for " << path << ": " << size_lib << "\n";
+    std::cerr << "size of libdeflate for " << path << ": " << size_lib << "\n";
     writeBufferToFile(out_data_lib.data, size_lib, path + "libtestdeflate.txt");
 
     File out_data_inhpp(file.size);
@@ -73,23 +115,23 @@ bool testDecompressionFile (std::string path, bool compression_higher) {
     if (sizein_hpp == 0) {
         return false;
     }
-    std::cout << "size of inflate.hpp for " << path << ": " << sizein_hpp << "\n";
+    std::cerr << "size of inflate.hpp for " << path << ": " << sizein_hpp << "\n";
     writeBufferToFile(out_data_inhpp.data, sizein_hpp, path + "hpptestinflate.bmp");
     bool same = sameData(&out_data_inhpp, &file);
-    std::cout << path << " inflate.hpp is the same as original?: " << ((same) ?  "true" : "false")  << "\n"; 
+    std::cerr << path << " inflate.hpp is the same as original?: " << ((same) ?  "true" : "false")  << "\n"; 
 
     std::vector<uint8_t> out_data_hpp = deflate::compress(file.data, file.size, compression_higher);
     if (out_data_hpp.size() == 0) {
         return false;
     }
     writeBufferToFile(reinterpret_cast<char*>(out_data_hpp.data()), out_data_hpp.size(), path + "hpptestdeflate.txt");
-    std::cout << "size of deflate.hpp for " << path << " : " << out_data_hpp.size() << "\n";
+    std::cerr << "size of deflate.hpp for " << path << " : " << out_data_hpp.size() << "\n";
     //decompressing the data
     libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
     File out_inflate_lib(file.size*2);
     size_t out_lib_deflate = 0;
     libdeflate_result result = libdeflate_deflate_decompress(decompressor, out_data_hpp.data(), out_data_hpp.size(), out_inflate_lib.data, file.size*2, &out_lib_deflate);
-    std::cout << "size of libdeflate inflate for " << path << " : " << out_lib_deflate << "\n"; 
+    std::cerr << "size of libdeflate inflate for " << path << " : " << out_lib_deflate << "\n"; 
     if (result != LIBDEFLATE_SUCCESS) {
         return false;
     }
@@ -97,7 +139,7 @@ bool testDecompressionFile (std::string path, bool compression_higher) {
     // test inflate on hppdeflate
     File out_inflate_hpp_hpp(file.size);
     size_t sizein_hpp_hpp = inflate::decompress(out_data_hpp.data(), out_data_hpp.size(), out_inflate_hpp_hpp.data, file.size);
-    std::cout << "size of inflate.hpp (inflate of deflate.hpp) for " << path << ": " << sizein_hpp << "\n";
+    std::cerr << "size of inflate.hpp (inflate of deflate.hpp) for " << path << ": " << sizein_hpp << "\n";
     if (sizein_hpp_hpp == 0) {
         return false;
     }
@@ -116,9 +158,9 @@ void testDeflateSpeed(std::string path, size_t n, bool compress_better) {
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> elapsed = end - start;
         total += elapsed.count();
-        std::cout << "hppdeflate execution time: " << elapsed.count() << " ms\n";
+        std::cerr << "hppdeflate execution time: " << elapsed.count() << " ms\n";
     }
-    std::cout << "Average: " << (total / n) << " ms\n";
+    std::cerr << "Average: " << (total / n) << " ms\n";
 }
 
 void testInflateSpeed (std::string path, size_t n) {
@@ -131,9 +173,9 @@ void testInflateSpeed (std::string path, size_t n) {
         auto end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double, std::milli> elapsed = end - start;
         total += elapsed.count();
-        std::cout << "hppinflate execution time: " << elapsed.count() << " ms\n";
+        std::cerr << "hppinflate execution time: " << elapsed.count() << " ms\n";
     }
-    std::cout << "Average: " << (total / n) << " ms\n";
+    std::cerr << "Average: " << (total / n) << " ms\n";
 }
 
 void compareInflateLibVector (std::string path) {
@@ -147,12 +189,12 @@ void compareInflateLibVector (std::string path) {
         uint8_t f = file.data[i];
         uint8_t d = decomp[i];
         if (f != d) {
-            std::cout << "inflate.hpp was different from original file: " << i << " , " << path << "\n";
+            std::cerr << "inflate.hpp was different from original file: " << i << " , " << path << "\n";
             return;
         }
     }
-    std::cout << "inflate.hpp was the same as original file!\n";
-    std::cout << path << "\n";
+    std::cerr << "inflate.hpp was the same as original file!\n";
+    std::cerr << path << "\n";
 }
 
 void testInflateZlibFile (std::string path) {
@@ -163,29 +205,31 @@ void testInflateZlibFile (std::string path) {
     size_t ret = 0;
     libdeflate_result result = libdeflate_deflate_decompress(decompressor, file.data + 2, file.size - 2, lib.data, lib.size, &ret);
     if (result != LIBDEFLATE_SUCCESS) {
-        std::cout << "inflate file failed " << result << "\n";
+        std::cerr << "inflate file failed " << result << "\n";
         return;
     }
     for (size_t i = 0; i < ret && i < decomp.size(); i++) {
         if (decomp[i] != (uint8_t)lib.data[i]) {
-            std::cout << "inflate file failed!\n";
-            std::cout << i << ", " << path << "\n";
+            std::cerr << "inflate file failed!\n";
+            std::cerr << i << ", " << path << "\n";
             return;
         }
     }
-    std::cout << "inflate file matched!\n";
-    std::cout << path << "\n";
+    std::cerr << "inflate file matched!\n";
+    std::cerr << path << "\n";
 }
 
-int main () {
+// inflate issue was the file reader not having a copy construcor!
+// deflate copy constructor offset was wrong!
 
-    std::cout << "Libdeflate test!\n";
+int main () {
+    std::cerr << "Libdeflate test!\n";
 
     compareInflateLibVector("test.bmp");
     testInflateZlibFile("weird.dat");
-    testDeflateSpeed("test.bmp", 10, false);
+    /* testDeflateSpeed("test.bmp", 10, false);
     testDeflateSpeed("test.bmp", 1, true);
-    testDeflateSpeed("large.bmp", 1, false);
+    testDeflateSpeed("large.bmp", 1, false); */
     testDecompressionFile("test.bmp", false);
     testDecompressionFile("tiny.bmp", false);
     testDecompressionFile("test.bmp", true);
