@@ -1,7 +1,5 @@
 #pragma once
 #include "common.hpp"
-#include <stdexcept>
-#define KB32 32768
 /*
 In other words, if one were to print out the compressed data as
 a sequence of bytes, starting with the first byte at the
@@ -268,6 +266,13 @@ class inflate : deflate_compressor {
 
         }
     }
+
+    static size_t realDecompress () {
+        size_t out_size = 0;
+
+        return out_size;
+    }
+
     public:
 
     static size_t decompressZlib (void* in, size_t in_size, void* out, size_t out_size) {

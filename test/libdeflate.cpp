@@ -237,6 +237,13 @@ int main () {
     testDecompressionFile("large.bmp", false);
     deflate::compress("test.bmp", "hppdeflate_testbmp", true);
     inflate::decompress("hppdeflate_testbmp", "hppinflate_test.bmp");
+    File test = readFile("test.bmp");
+    File inflate_test = readFile("hppinflate_test.bmp");
+    if (sameData(&test, &inflate_test)) {
+        std::cerr << "test.bmp and hppinflate_test.bmp are the same!\n";
+    } else {
+        std::cerr << "test.bmp and hppinflate_test.bmp are different!\n";
+    }
     testInflateSpeed("large.bmplibtestdeflate.txt", 1);
     return 0;
 }

@@ -10,15 +10,21 @@
 #include <algorithm>
 #include <string>
 #include <fstream>
+#include <functional>
+#define KB32 32768
 
 // deflate
-
+//  - update testing to be more readable/comprehensive
+//  - add vector of bytes input function
+//  - optimize
+//  - more compression options for better or faster compression (like zlib)
+//  - heuristic for when to use dynamic huffman vs fixed huffman vs uncompressed
 // inflate
 //  -if ever need to optimize inflate, add a code lookup table in huffman tree
 //  -support zlib better
 //      -allow zlib files
 //      -parse dicts if fdict bit set
-
+//  - switch decompress to be more like compress, so we don't rewrite code for reading from file vs reading from buffer
 class deflate_compressor {
     protected:
 

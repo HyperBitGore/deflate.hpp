@@ -1,8 +1,6 @@
 #pragma once
 #include "common.hpp"
-#include <cstdint>
 #include <utility>
-#include <vector>
 #ifdef DEBUG
 #include <iostream>
 #include <chrono>
@@ -10,7 +8,6 @@
 #define MAX_LITLEN_CODE_LEN 15
 #define MAX_DIST_CODE_LEN 15
 #define MAX_PRE_CODE_LEN 7
-#define KB32 32768
 #define CHAR_BITS 0b111111111
 #define LENGTH_BITS 0b11111000000000
 #define DISTANCE_BITS 0b11111111111111111100000000000000
@@ -675,37 +672,24 @@ private:
         bs.addBits(flipBits(endcode.code, endcode.len), endcode.len);
         return bs;
     }
-public:
-    // done
-    static size_t compress (std::string file_path, std::string new_file, bool better_compression) {
+    static size_t realCompress (std::function<size_t(uint32_t buffer[], uint8_t raw_buffer[], size_t n, size_t* read_buffer_index)> readFunc, std::function<void(Bitstream& bs)> writeFunc, bool better_compression) {
+        size_t out_size = 0;
         FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
         FlatHuffmanTree fixed_huffman(generateFixedCodes());
         RangeLookup rl = generateLengthLookup();
         RangeLookup dl = generateDistanceLookup();
         bool q = false;
-        size_t index = 0;
 
         size_t read_buffer_index = 0;
         uint32_t read_buffer[KB32];
         uint8_t raw_buffer[KB32];
         std::memset(read_buffer, 0, KB32);
-
-        std::ifstream f;
-        f.open(file_path.c_str(), std::ios::binary);
-
-        BitFile out_file(new_file);
-        size_t out_size = 0;
-        while (!q) {
-            f.read((char*)(raw_buffer), KB32);
-            std::streamsize read = f.gcount();
-            for(size_t i = 0; i < read; i++, read_buffer_index++) {
-                read_buffer[read_buffer_index] = ((uint32_t)raw_buffer[i] & 0xff);
-            }
-            // writing the block out to file
+        while(!q) {
+            size_t read = readFunc(read_buffer, raw_buffer, KB32, &read_buffer_index);
             if (read < KB32) {
                 q = true;
             }
-            LZ77 lz(KB32);
+             LZ77 lz(KB32);
             // finding the matches above length of 2
             if (better_compression) {
                 lz.getMatchesSlow(read_buffer, raw_buffer, read_buffer_index, rl, dl);
@@ -741,76 +725,54 @@ public:
             } else {
                 picked = makeUncompressedBlock(raw_buffer, read_buffer_index, q);
             }
-            out_file.addBitStream(picked);
+            writeFunc(picked);
             read_buffer_index = 0;
         }
+
+        return out_size;
+    }
+public:
+    // done
+    static size_t compress (std::string file_path, std::string new_file, bool better_compression) {
+        std::ifstream f;
+        f.open(file_path.c_str(), std::ios::binary);
+
+        BitFile out_file(new_file);
+        size_t out_size = 0;
+        size_t size = realCompress(
+            [&](uint32_t read_buffer[], uint8_t raw_buffer[], size_t n, size_t* read_buffer_index) -> size_t {
+                f.read((char*)(raw_buffer), n);
+                std::streamsize read = f.gcount();
+                for(size_t i = 0; i < read; i++, (*read_buffer_index)++) {
+                    read_buffer[*read_buffer_index] = ((uint32_t)raw_buffer[i] & 0xff);
+                }
+                return (read > 0) ? static_cast<size_t>(read) : 0;
+            },
+            [&](Bitstream& bs) -> void {
+                out_file.addBitStream(bs);
+            }, better_compression
+        );
         out_file.writeFile();
         f.close();
         return out_size;
     }
 
     static std::vector<uint8_t> compress (char* data, size_t data_size, bool better_compression) {
-        FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
-        FlatHuffmanTree fixed_huffman(generateFixedCodes());
-        RangeLookup rl = generateLengthLookup();
-        RangeLookup dl = generateDistanceLookup();
-        bool q = false;
-        size_t index = 0;
         Bitstream out_stream;
-
-        size_t read_buffer_index = 0;
-        uint32_t read_buffer[KB32];
-        uint8_t raw_buffer[KB32];
-        std::memset(read_buffer, 0, KB32);
-         while (!q) {
-            for (; index < data_size && read_buffer_index < KB32; index++, read_buffer_index++) {
-                read_buffer[read_buffer_index] = ((uint32_t)data[index]) & 0xff;
-                raw_buffer[read_buffer_index] = data[index];
-            }
-            // writing the block out to file
-            if (index >= data_size) {
-                q = true;
-            }
-            LZ77 lz(KB32);
-            // finding the matches above length of 2
-            if (better_compression) {
-                lz.getMatchesSlow(read_buffer, raw_buffer, read_buffer_index, rl, dl);
-            } else {
-                lz.getMatches(read_buffer, raw_buffer, read_buffer_index, rl, dl);
-            }
-
-            std::pair<FlatHuffmanTree, FlatHuffmanTree> trees;
-            bool set_fixed = false;
-            try {
-                trees = constructDynamicHuffmanTree(read_buffer, read_buffer_index, rl, dl);
-            } catch (std::runtime_error e) {
-                #ifdef DEBUG
-                std::cout << "Dynamic tree oversubscribed!\n";
-                #endif
-                set_fixed = true;
-            }
-            Bitstream bs_fixed = compressBuffer(read_buffer, read_buffer_index, fixed_huffman, fixed_dist_huffman, 0b010, q, rl, dl);
-            Bitstream bs_dynamic;
-            try {
-                bs_dynamic = compressBuffer(read_buffer, read_buffer_index, trees.first, trees.second, 0b100, q, rl, dl);
-            } catch (std::runtime_error e) {
-                #ifdef DEBUG
-                std::cout << "Dynamic tree oversubscribed!\n";
-                #endif
-                set_fixed = true;
-            }
-
-            Bitstream picked;
-            if (!set_fixed && bs_dynamic.getSize() < bs_fixed.getSize() && bs_dynamic.getSize() < read_buffer_index + 5) {
-                picked = bs_dynamic;
-            } else if(bs_fixed.getSize() < read_buffer_index + 5){
-                picked = bs_fixed;
-            } else {
-                picked = makeUncompressedBlock(raw_buffer, read_buffer_index, q);
-            }
-            out_stream.copyBitstream(picked);
-            read_buffer_index = 0;
-        }
+        size_t index = 0;
+        realCompress(
+            [&](uint32_t read_buffer[], uint8_t raw_buffer[], size_t n, size_t* read_buffer_index) -> size_t {
+                size_t count = 0;
+                for (; index < data_size && count < n; index++, (*read_buffer_index)++, count++) {
+                    read_buffer[*read_buffer_index] = ((uint32_t)data[index]) & 0xff;
+                    raw_buffer[*read_buffer_index] = data[index];
+                }
+                return count;
+            },
+            [&](Bitstream& bs) -> void {
+                out_stream.copyBitstream(bs);
+            }, better_compression
+        );
         return out_stream.getData();
     }
 };
