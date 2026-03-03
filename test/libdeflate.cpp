@@ -193,8 +193,7 @@ void compareInflateLibVector (std::string path) {
             return;
         }
     }
-    std::cerr << "inflate.hpp was the same as original file!\n";
-    std::cerr << path << "\n";
+    std::cerr << "inflate.hpp was the same as original file! " << path << "\n";
 }
 
 void testInflateZlibFile (std::string path) {
@@ -215,8 +214,7 @@ void testInflateZlibFile (std::string path) {
             return;
         }
     }
-    std::cerr << "inflate file matched!\n";
-    std::cerr << path << "\n";
+    std::cerr << "inflate file matched!" << path << "\n";
 }
 
 // inflate issue was the file reader not having a copy construcor!
@@ -226,15 +224,16 @@ int main () {
     std::cerr << "Libdeflate test!\n";
 
     compareInflateLibVector("test.bmp");
+    compareInflateLibVector("large.bmp");
     testInflateZlibFile("weird.dat");
     /* testDeflateSpeed("test.bmp", 10, false);
     testDeflateSpeed("test.bmp", 1, true);
     testDeflateSpeed("large.bmp", 1, false); */
+    testDecompressionFile("large.bmp", false);
     testDecompressionFile("test.bmp", false);
     testDecompressionFile("tiny.bmp", false);
     testDecompressionFile("test.bmp", true);
     testDecompressionFile("tiny.bmp", true);
-    testDecompressionFile("large.bmp", false);
     deflate::compress("test.bmp", "hppdeflate_testbmp", true);
     inflate::decompress("hppdeflate_testbmp", "hppinflate_test.bmp");
     File test = readFile("test.bmp");
