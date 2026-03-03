@@ -775,4 +775,23 @@ public:
         );
         return out_stream.getData();
     }
+    
+    static std::vector<uint8_t> compress (std::vector<uint8_t>& data, bool better_compression) {
+        Bitstream out_stream;
+        size_t index = 0;
+        realCompress(
+            [&](uint32_t read_buffer[], uint8_t raw_buffer[], size_t n, size_t* read_buffer_index) -> size_t {
+                size_t count = 0;
+                for (; index < data.size() && count < n; index++, (*read_buffer_index)++, count++) {
+                    read_buffer[*read_buffer_index] = ((uint32_t)data[index]) & 0xff;
+                    raw_buffer[*read_buffer_index] = data[index];
+                }
+                return count;
+            },
+            [&](Bitstream& bs) -> void {
+                out_stream.copyBitstream(bs);
+            }, better_compression
+        );
+        return out_stream.getData();
+    }
 };
