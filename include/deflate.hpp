@@ -672,7 +672,12 @@ private:
         bs.addBits(flipBits(endcode.code, endcode.len), endcode.len);
         return bs;
     }
-    static size_t realCompress (std::function<size_t(uint32_t buffer[], uint8_t raw_buffer[], size_t n, size_t* read_buffer_index)> readFunc, std::function<void(Bitstream& bs)> writeFunc, bool better_compression) {
+    // compression levels
+    // 0 - no compression, just uncompressed blocks
+    // 1 - fastest compression, no matching
+    // 2 - default compression, some matching
+    // 3 - best compression, more thorough matching
+    static size_t realCompress (std::function<size_t(uint32_t buffer[], uint8_t raw_buffer[], size_t n, size_t* read_buffer_index)> readFunc, std::function<void(Bitstream& bs)> writeFunc, int compression_level) {
         size_t out_size = 0;
         FlatHuffmanTree fixed_dist_huffman(generateFixedDistanceCodes());
         FlatHuffmanTree fixed_huffman(generateFixedCodes());
@@ -691,10 +696,21 @@ private:
             }
              LZ77 lz(KB32);
             // finding the matches above length of 2
-            if (better_compression) {
-                lz.getMatchesSlow(read_buffer, raw_buffer, read_buffer_index, rl, dl);
-            } else {
-                lz.getMatches(read_buffer, raw_buffer, read_buffer_index, rl, dl);
+            switch (compression_level) {
+                case 3:
+                    lz.getMatchesSlow(read_buffer, raw_buffer, read_buffer_index, rl, dl);
+                break;
+                case 2:
+                    lz.getMatches(read_buffer, raw_buffer, read_buffer_index, rl, dl);
+                break;
+                case 1:
+                    // no matches, still huffman coded
+                break;
+                case 0:
+                    // raw uncompressed blocks, no huffman coding
+                    writeFunc(makeUncompressedBlock(raw_buffer, read_buffer_index, q));
+                    read_buffer_index = 0;
+                    continue;
             }
             std::pair<FlatHuffmanTree, FlatHuffmanTree> trees;
             bool set_fixed = false;
@@ -733,7 +749,7 @@ private:
     }
 public:
     // done
-    static size_t compress (std::string file_path, std::string new_file, bool better_compression) {
+    static size_t compress (std::string file_path, std::string new_file, int compression_level) {
         std::ifstream f;
         f.open(file_path.c_str(), std::ios::binary);
 
@@ -750,14 +766,14 @@ public:
             },
             [&](Bitstream& bs) -> void {
                 out_file.addBitStream(bs);
-            }, better_compression
+            }, compression_level
         );
         out_file.writeFile();
         f.close();
         return out_size;
     }
 
-    static std::vector<uint8_t> compress (char* data, size_t data_size, bool better_compression) {
+    static std::vector<uint8_t> compress (char* data, size_t data_size, int compression_level) {
         Bitstream out_stream;
         size_t index = 0;
         realCompress(
@@ -771,12 +787,12 @@ public:
             },
             [&](Bitstream& bs) -> void {
                 out_stream.copyBitstream(bs);
-            }, better_compression
+            }, compression_level
         );
         return out_stream.getData();
     }
     
-    static std::vector<uint8_t> compress (std::vector<uint8_t>& data, bool better_compression) {
+    static std::vector<uint8_t> compress (std::vector<uint8_t>& data, int compression_level) {
         Bitstream out_stream;
         size_t index = 0;
         realCompress(
@@ -790,7 +806,7 @@ public:
             },
             [&](Bitstream& bs) -> void {
                 out_stream.copyBitstream(bs);
-            }, better_compression
+            }, compression_level
         );
         return out_stream.getData();
     }

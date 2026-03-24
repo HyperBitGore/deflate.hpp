@@ -14,7 +14,7 @@
 #define KB32 32768
 
 // deflate
-//  - update testing to be more readable/comprehensive
+//  - compression level 1 broken
 //  - optimize
     //  - more compression options for better or faster compression (like zlib)
     //  - heuristic for when to use dynamic huffman vs fixed huffman vs uncompressed

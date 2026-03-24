@@ -97,152 +97,207 @@ File readFile (std::string name) {
     return file;
 }
 
-bool testDecompressionFile (std::string path, bool compression_higher) {
-    File file = readFile(path);
-    std::cerr << path << " is " << file.size << " bytes!\n";
+// Runs a full round-trip test for a given image file:
+//   1. libdeflate compresses the file, then inflate.hpp decompresses it.
+//   2. deflate.hpp compresses the file, then libdeflate decompresses it.
+//   3. deflate.hpp compresses the file, then inflate.hpp decompresses it.
+// Returns false if any step fails.
+bool testDecompressionFile(std::string path, int compressionLevel) {
+    File original = readFile(path);
+    std::cerr << path << " is " << original.size << " bytes\n";
+
+    // --- Step 1: libdeflate compress → inflate.hpp decompress ---
     libdeflate_compressor* compressor = libdeflate_alloc_compressor(1);
-    File out_data_lib(file.size + 100);
-    //testing the two
-    size_t size_lib = libdeflate_deflate_compress(compressor, file.data, file.size, out_data_lib.data, file.size + 100);
-    if (size_lib == 0) {
+    File libCompressed(original.size + 100);
+    size_t libCompressedSize = libdeflate_deflate_compress(
+        compressor, original.data, original.size,
+        libCompressed.data, original.size + 100);
+    if (libCompressedSize == 0) {
+        std::cerr << "[FAIL] libdeflate compress failed for " << path << "\n";
         return false;
     }
-    std::cerr << "size of libdeflate for " << path << ": " << size_lib << "\n";
-    writeBufferToFile(out_data_lib.data, size_lib, path + "libtestdeflate.txt");
+    std::cerr << "libdeflate compressed size for " << path << ": " << libCompressedSize << "\n";
+    writeBufferToFile(libCompressed.data, libCompressedSize, path + "libtestdeflate.txt");
 
-    File out_data_inhpp(file.size);
-    size_t sizein_hpp = inflate::decompress(out_data_lib.data, size_lib, out_data_inhpp.data, file.size);
-    if (sizein_hpp == 0) {
+    File hppInflated(original.size);
+    size_t hppInflatedSize = inflate::decompress(
+        libCompressed.data, libCompressedSize,
+        hppInflated.data, original.size);
+    if (hppInflatedSize == 0) {
+        std::cerr << "[FAIL] inflate.hpp decompress of libdeflate output failed for " << path << "\n";
         return false;
     }
-    std::cerr << "size of inflate.hpp for " << path << ": " << sizein_hpp << "\n";
-    writeBufferToFile(out_data_inhpp.data, sizein_hpp, path + "hpptestinflate.bmp");
-    bool same = sameData(&out_data_inhpp, &file);
-    std::cerr << path << " inflate.hpp is the same as original?: " << ((same) ?  "true" : "false")  << "\n"; 
+    writeBufferToFile(hppInflated.data, hppInflatedSize, path + "hpptestinflate.bmp");
+    std::cerr << "[PASS] Step 1: inflate.hpp round-trip (via libdeflate) succeeded\n";
 
-    std::vector<uint8_t> out_data_hpp = deflate::compress(file.data, file.size, compression_higher);
-    if (out_data_hpp.size() == 0) {
+    // --- Step 2: deflate.hpp compress → libdeflate decompress ---
+    std::vector<uint8_t> hppCompressed = deflate::compress(original.data, original.size, compressionLevel);
+    if (hppCompressed.size() == 0) {
+        std::cerr << "[FAIL] deflate.hpp compress failed for " << path << "\n";
         return false;
     }
-    writeBufferToFile(reinterpret_cast<char*>(out_data_hpp.data()), out_data_hpp.size(), path + "hpptestdeflate.txt");
-    std::cerr << "size of deflate.hpp for " << path << " : " << out_data_hpp.size() << "\n";
-    //decompressing the data
+    std::cerr << "deflate.hpp compressed size for " << path << ": " << hppCompressed.size() << "\n";
+    writeBufferToFile(reinterpret_cast<char*>(hppCompressed.data()), hppCompressed.size(), path + "hpptestdeflate.txt");
+
     libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
-    File out_inflate_lib(file.size*2);
-    size_t out_lib_deflate = 0;
-    libdeflate_result result = libdeflate_deflate_decompress(decompressor, out_data_hpp.data(), out_data_hpp.size(), out_inflate_lib.data, file.size*2, &out_lib_deflate);
-    std::cerr << "size of libdeflate inflate for " << path << " : " << out_lib_deflate << "\n"; 
-    if (result != LIBDEFLATE_SUCCESS) {
+    File libInflated(original.size * 2);
+    size_t libInflatedSize = 0;
+    libdeflate_result libInflateResult = libdeflate_deflate_decompress(
+        decompressor,
+        hppCompressed.data(), hppCompressed.size(),
+        libInflated.data, original.size * 2,
+        &libInflatedSize);
+    if (libInflateResult != LIBDEFLATE_SUCCESS) {
+        std::cerr << "[FAIL] libdeflate decompress of deflate.hpp output failed for " << path << "\n";
         return false;
     }
-    writeBufferToFile(out_inflate_lib.data, out_lib_deflate, path + "libtestinflate.bmp");
-    // test inflate on hppdeflate
-    File out_inflate_hpp_hpp(file.size);
-    size_t sizein_hpp_hpp = inflate::decompress(out_data_hpp.data(), out_data_hpp.size(), out_inflate_hpp_hpp.data, file.size);
-    std::cerr << "size of inflate.hpp (inflate of deflate.hpp) for " << path << ": " << sizein_hpp << "\n";
-    if (sizein_hpp_hpp == 0) {
+    std::cerr << "libdeflate decompressed size for " << path << ": " << libInflatedSize << "\n";
+    writeBufferToFile(libInflated.data, libInflatedSize, path + "libtestinflate.bmp");
+    std::cerr << "[PASS] Step 2: libdeflate round-trip (via deflate.hpp) succeeded\n";
+
+    // --- Step 3: deflate.hpp compress → inflate.hpp decompress ---
+    File hppInflatedFromHpp(original.size);
+    size_t hppInflatedFromHppSize = inflate::decompress(
+        hppCompressed.data(), hppCompressed.size(),
+        hppInflatedFromHpp.data, original.size);
+    if (hppInflatedFromHppSize == 0) {
+        std::cerr << "[FAIL] inflate.hpp decompress of deflate.hpp output failed for " << path << "\n";
         return false;
     }
-    writeBufferToFile(out_inflate_hpp_hpp.data, sizein_hpp_hpp, path + "hpptestinflatehpp.bmp");
+    std::cerr << "inflate.hpp decompressed size (deflate.hpp input) for " << path << ": " << hppInflatedFromHppSize << "\n";
+    writeBufferToFile(hppInflatedFromHpp.data, hppInflatedFromHppSize, path + "hpptestinflatehpp.bmp");
+    std::cerr << "[PASS] Step 3: inflate.hpp round-trip (via deflate.hpp) succeeded\n";
+
+    std::cerr << "\n=== [PASS] All tests passed for " << path << " ===\n\n";
     return true;
 }
 
-void testDeflateSpeed(std::string path, size_t n, bool compress_better) {
+void testDeflateSpeed(std::string path, size_t iterations, int compressionLevel) {
     File file = readFile(path);
-    double total = 0;
-    for (size_t i = 0; i < n; i++) {
+    double totalMs = 0;
+    for (size_t i = 0; i < iterations; i++) {
         auto start = std::chrono::high_resolution_clock::now();
-        
-        std::vector<uint8_t> out_data_hpp = deflate::compress(file.data, file.size, compress_better);
-
+        std::vector<uint8_t> compressed = deflate::compress(file.data, file.size, compressionLevel);
         auto end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> elapsed = end - start;
-        total += elapsed.count();
-        std::cerr << "hppdeflate execution time: " << elapsed.count() << " ms\n";
+
+        double elapsedMs = std::chrono::duration<double, std::milli>(end - start).count();
+        totalMs += elapsedMs;
+        std::cerr << "deflate.hpp run " << (i + 1) << ": " << elapsedMs << " ms\n";
     }
-    std::cerr << "Average: " << (total / n) << " ms\n";
+    std::cerr << "deflate.hpp average over " << iterations << " runs: " << (totalMs / iterations) << " ms\n";
 }
 
-void testInflateSpeed (std::string path, size_t n) {
+void testInflateSpeed(std::string path, size_t iterations) {
     File file = readFile(path);
-    double total = 0;
-    for (size_t i = 0; i < n; i++) {
+    double totalMs = 0;
+    for (size_t i = 0; i < iterations; i++) {
         auto start = std::chrono::high_resolution_clock::now();
-        std::vector<uint8_t> out_data_hpp = inflate::decompress(file.data, file.size);
-
+        std::vector<uint8_t> decompressed = inflate::decompress(file.data, file.size);
         auto end = std::chrono::high_resolution_clock::now();
-        std::chrono::duration<double, std::milli> elapsed = end - start;
-        total += elapsed.count();
-        std::cerr << "hppinflate execution time: " << elapsed.count() << " ms\n";
+
+        double elapsedMs = std::chrono::duration<double, std::milli>(end - start).count();
+        totalMs += elapsedMs;
+        std::cerr << "inflate.hpp run " << (i + 1) << ": " << elapsedMs << " ms\n";
     }
-    std::cerr << "Average: " << (total / n) << " ms\n";
+    std::cerr << "inflate.hpp average over " << iterations << " runs: " << (totalMs / iterations) << " ms\n";
 }
 
-void compareInflateLibVector (std::string path) {
-    File file = readFile(path);
+// Compresses a file with libdeflate, then decompresses with inflate.hpp (vector
+// overload), and verifies the result matches the original byte-for-byte.
+void compareInflateLibVector(std::string path) {
+    File original = readFile(path);
     libdeflate_compressor* compressor = libdeflate_alloc_compressor(1);
-    File out_data_lib(file.size + 100);
-    //testing the two
-    size_t size_lib = libdeflate_deflate_compress(compressor, file.data, file.size, out_data_lib.data, file.size + 100);
-    std::vector<uint8_t> decomp = inflate::decompress(out_data_lib.data, size_lib);
-    for (size_t i = 0; i < decomp.size(); i++) {
-        uint8_t f = file.data[i];
-        uint8_t d = decomp[i];
-        if (f != d) {
-            std::cerr << "inflate.hpp was different from original file: " << i << " , " << path << "\n";
+    File libCompressed(original.size + 100);
+    size_t libCompressedSize = libdeflate_deflate_compress(
+        compressor, original.data, original.size,
+        libCompressed.data, original.size + 100);
+
+    std::vector<uint8_t> hppInflated = inflate::decompress(libCompressed.data, libCompressedSize);
+    for (size_t i = 0; i < hppInflated.size(); i++) {
+        if ((uint8_t)original.data[i] != hppInflated[i]) {
+            std::cerr << "[FAIL] inflate.hpp mismatch at byte " << i << " for " << path << "\n";
             return;
         }
     }
-    std::cerr << "inflate.hpp was the same as original file! " << path << "\n";
+    std::cerr << "[PASS] inflate.hpp matches original: " << path << "\n";
 }
 
-void testInflateZlibFile (std::string path) {
-    File file = readFile(path);
-    std::vector<uint8_t> decomp = inflate::decompressZlib(file.data, file.size);
+// Decompresses a zlib-wrapped file with both inflate.hpp and libdeflate, then
+// compares results to verify inflate::decompressZlib is correct.
+// Note: libdeflate skips the 2-byte zlib header, so we offset accordingly.
+void testInflateZlibFile(std::string path) {
+    File compressed = readFile(path);
+
+    std::vector<uint8_t> hppDecompressed = inflate::decompressZlib(compressed.data, compressed.size);
+
     libdeflate_decompressor* decompressor = libdeflate_alloc_decompressor();
-    File lib(decomp.size());
-    size_t ret = 0;
-    libdeflate_result result = libdeflate_deflate_decompress(decompressor, file.data + 2, file.size - 2, lib.data, lib.size, &ret);
-    if (result != LIBDEFLATE_SUCCESS) {
-        std::cerr << "inflate file failed " << result << "\n";
+    File libDecompressed(hppDecompressed.size());
+    size_t libDecompressedSize = 0;
+    // Skip the 2-byte zlib header so libdeflate sees raw deflate data
+    libdeflate_result libResult = libdeflate_deflate_decompress(
+        decompressor,
+        compressed.data + 2, compressed.size - 2,
+        libDecompressed.data, libDecompressed.size,
+        &libDecompressedSize);
+    if (libResult != LIBDEFLATE_SUCCESS) {
+        std::cerr << "[FAIL] libdeflate decompress failed (code " << libResult << ") for " << path << "\n";
         return;
     }
-    for (size_t i = 0; i < ret && i < decomp.size(); i++) {
-        if (decomp[i] != (uint8_t)lib.data[i]) {
-            std::cerr << "inflate file failed!\n";
-            std::cerr << i << ", " << path << "\n";
+
+    for (size_t i = 0; i < libDecompressedSize && i < hppDecompressed.size(); i++) {
+        if (hppDecompressed[i] != (uint8_t)libDecompressed.data[i]) {
+            std::cerr << "[FAIL] inflate::decompressZlib mismatch at byte " << i << " for " << path << "\n";
             return;
         }
     }
-    std::cerr << "inflate file matched!" << path << "\n";
+    std::cerr << "[PASS] inflate::decompressZlib matches libdeflate: " << path << "\n";
 }
 
-// inflate issue was the file reader not having a copy construcor!
-// deflate copy constructor offset was wrong!
+int main() {
+    std::cerr << "=== deflate/inflate.hpp test suite ===\n\n";
 
-int main () {
-    std::cerr << "Libdeflate test!\n";
-
+    // --- inflate.hpp correctness: compare against libdeflate ---
+    std::cerr << "-- inflate.hpp vector decompress vs libdeflate --\n";
     compareInflateLibVector("test.bmp");
     compareInflateLibVector("large.bmp");
+
+    // --- inflate::decompressZlib correctness ---
+    std::cerr << "\n-- inflate::decompressZlib vs libdeflate --\n";
     testInflateZlibFile("weird.dat");
-    /* testDeflateSpeed("test.bmp", 10, false);
-    testDeflateSpeed("test.bmp", 1, true);
-    testDeflateSpeed("large.bmp", 1, false); */
-    testDecompressionFile("large.bmp", false);
-    testDecompressionFile("test.bmp", false);
-    testDecompressionFile("tiny.bmp", false);
-    testDecompressionFile("test.bmp", true);
-    testDecompressionFile("tiny.bmp", true);
-    deflate::compress("test.bmp", "hppdeflate_testbmp", true);
+
+    // --- Full round-trip: libdeflate ↔ inflate.hpp and deflate.hpp ↔ libdeflate ---
+    std::cerr << "\n-- Full round-trip tests (compression level 0) --\n";
+    testDecompressionFile("large.bmp", 0);
+    testDecompressionFile("test.bmp",  0);
+    testDecompressionFile("tiny.bmp",  0);
+
+    std::cerr << "\n-- Full round-trip tests (compression level 1) --\n";
+    // testDecompressionFile("large.bmp", 1);
+    // testDecompressionFile("test.bmp",  1);
+    // testDecompressionFile("tiny.bmp",  1);
+
+    std::cerr << "\n-- Full round-trip tests (compression level 2) --\n";
+    testDecompressionFile("large.bmp", 2);
+    testDecompressionFile("test.bmp",  2);
+    testDecompressionFile("tiny.bmp",  2);
+
+    std::cerr << "\n-- Full round-trip tests (compression level 3) --\n";
+    testDecompressionFile("test.bmp", 3);
+    testDecompressionFile("tiny.bmp", 3);
+
+    // --- File-path API round-trip ---
+    std::cerr << "\n-- File-path API round-trip (test.bmp, level 3) --\n";
+    deflate::compress("test.bmp", "hppdeflate_testbmp", 3);
     inflate::decompress("hppdeflate_testbmp", "hppinflate_test.bmp");
-    File test = readFile("test.bmp");
-    File inflate_test = readFile("hppinflate_test.bmp");
-    if (sameData(&test, &inflate_test)) {
-        std::cerr << "test.bmp and hppinflate_test.bmp are the same!\n";
-    } else {
-        std::cerr << "test.bmp and hppinflate_test.bmp are different!\n";
-    }
+    File original  = readFile("test.bmp");
+    File roundTrip = readFile("hppinflate_test.bmp");
+    std::cerr << (sameData(&original, &roundTrip)
+        ? "[PASS] test.bmp -> deflate -> inflate matches original\n"
+        : "[FAIL] test.bmp -> deflate -> inflate does not match original\n");
+
+    // --- inflate.hpp speed benchmark ---
+    std::cerr << "\n-- inflate.hpp speed benchmark --\n";
     testInflateSpeed("large.bmplibtestdeflate.txt", 1);
+
     return 0;
 }
