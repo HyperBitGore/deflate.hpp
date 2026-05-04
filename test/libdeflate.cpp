@@ -272,7 +272,7 @@ int main() {
     testDecompressionFile("tiny.bmp",  0);
 
     std::cerr << "\n-- Full round-trip tests (compression level 1) --\n";
-    // testDecompressionFile("large.bmp", 1);
+    testDecompressionFile("large.bmp", 1);
     // testDecompressionFile("test.bmp",  1);
     // testDecompressionFile("tiny.bmp",  1);
 

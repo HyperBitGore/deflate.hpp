@@ -694,7 +694,7 @@ private:
             if (read < KB32) {
                 q = true;
             }
-             LZ77 lz(KB32);
+            LZ77 lz(KB32);
             // finding the matches above length of 2
             switch (compression_level) {
                 case 3:
@@ -708,8 +708,11 @@ private:
                 break;
                 case 0:
                     // raw uncompressed blocks, no huffman coding
-                    writeFunc(makeUncompressedBlock(raw_buffer, read_buffer_index, q));
-                    read_buffer_index = 0;
+                    {
+                        Bitstream bs = makeUncompressedBlock(raw_buffer, read_buffer_index, q);
+                        writeFunc(bs);
+                        read_buffer_index = 0;
+                    }
                     continue;
             }
             std::pair<FlatHuffmanTree, FlatHuffmanTree> trees;

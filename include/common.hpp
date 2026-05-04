@@ -397,6 +397,7 @@ class deflate_compressor {
                 // try fixing tree first
                 if (checkCodesOversubscribed(codes) != 1.0) {
                     std::string str = "Code tree is over or under subscribed!" + std::to_string(checkCodesOversubscribed(codes));
+                    std::cerr << str << "\n";
                     throw std::runtime_error(str.c_str());
                 }
                 return codes;
